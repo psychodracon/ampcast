@@ -1,20 +1,3 @@
-import {Except} from 'type-fest';
-import FilterType from 'types/FilterType';
-import ItemType from 'types/ItemType';
-import MediaAlbum from 'types/MediaAlbum';
-import MediaArtist from 'types/MediaArtist';
-import MediaItem from 'types/MediaItem';
-import MediaFilter from 'types/MediaFilter';
-import MediaListLayout from 'types/MediaListLayout';
-import MediaObject from 'types/MediaObject';
-import MediaPlaylist from 'types/MediaPlaylist';
-import MediaServiceId from 'types/MediaServiceId';
-import MediaSource, {AnyMediaSource, MediaMultiSource, MediaSourceItems} from 'types/MediaSource';
-import Pager, {PagerConfig} from 'types/Pager';
-import {exists, partition} from 'utils';
-import {NoSpotifyChartsError} from 'services/errors';
-import SimplePager from 'services/pagers/SimplePager';
-import {setHiddenSources} from 'services/mediaServices/servicesSettings';
 import {
     albumsLayout,
     mediaItemsLayout,
@@ -22,11 +5,30 @@ import {
     recentlyPlayedTracksLayout,
     songChartsLayout,
 } from 'components/MediaList/layouts';
+import {NoSpotifyChartsError} from 'services/errors';
+import {setHiddenSources} from 'services/mediaServices/servicesSettings';
+import SimplePager from 'services/pagers/SimplePager';
+import {Except} from 'type-fest';
+import FilterType from 'types/FilterType';
+import ItemType from 'types/ItemType';
+import MediaAlbum from 'types/MediaAlbum';
+import MediaArtist from 'types/MediaArtist';
+import MediaFilter from 'types/MediaFilter';
+import MediaItem from 'types/MediaItem';
+import MediaListLayout from 'types/MediaListLayout';
+import MediaListSort from 'types/MediaListSort';
+import MediaObject from 'types/MediaObject';
+import MediaPlaylist from 'types/MediaPlaylist';
+import MediaServiceId from 'types/MediaServiceId';
+import MediaSource, {AnyMediaSource, MediaMultiSource, MediaSourceItems} from 'types/MediaSource';
+import Pager, {PagerConfig} from 'types/Pager';
+import {exists, partition} from 'utils';
+import SpotifyRecentlyPlayedBrowser from './components/SpotifyRecentlyPlayedBrowser';
 import spotifyApi, {SpotifyAlbum, SpotifyArtist, SpotifyPlaylist} from './spotifyApi';
+import SpotifyClientSortPager from './SpotifyClientSortPager';
 import SpotifyPager, {SpotifyPage} from './SpotifyPager';
 import spotifySettings from './spotifySettings';
 import {getMarket} from './spotifyUtils';
-import SpotifyRecentlyPlayedBrowser from './components/SpotifyRecentlyPlayedBrowser';
 
 const serviceId: MediaServiceId = 'spotify';
 
@@ -38,6 +40,54 @@ const spotifyMediaItems: MediaSourceItems = {
 
 const spotifyPlaylistItems: MediaSourceItems = {
     layout: removeGenre(playlistItemsLayout),
+};
+
+const spotifyLikedSongsSort: MediaListSort = {
+    sortOptions: {
+        title: 'Title',
+        artist: 'Artist',
+        album: 'Album',
+        added_at: 'Date Favorited',
+    },
+    defaultSort: {
+        sortBy: 'added_at',
+        sortOrder: -1,
+    },
+};
+
+const spotifyLikedAlbumsSort: MediaListSort = {
+    sortOptions: {
+        title: 'Title',
+        artist: 'Artist',
+        year: 'Year',
+        added_at: 'Date Favorited',
+    },
+    defaultSort: {
+        sortBy: 'added_at',
+        sortOrder: -1,
+    },
+};
+
+const spotifyLikedArtistsSort: MediaListSort = {
+    sortOptions: {
+        name: 'Name',
+        added_at: 'Date Favorited',
+    },
+    defaultSort: {
+        sortBy: 'name',
+        sortOrder: 1,
+    },
+};
+
+const spotifyArtistAlbumsSort: MediaListSort = {
+    sortOptions: {
+        title: 'Title',
+        year: 'Year',
+    },
+    defaultSort: {
+        sortBy: 'year',
+        sortOrder: 1,
+    },
 };
 
 export const spotifySearch: MediaMultiSource = {
@@ -58,6 +108,9 @@ export const spotifySearch: MediaMultiSource = {
         createSearch<MediaArtist>(ItemType.Artist, {
             id: 'artists',
             title: 'Artists',
+            secondaryItems: {
+                sort: spotifyArtistAlbumsSort,
+            },
         }),
         createSearch<MediaPlaylist>(ItemType.Playlist, {
             id: 'playlists',
@@ -120,20 +173,30 @@ const spotifyLikedSongs: MediaSource<MediaItem> = {
     icon: 'heart',
     itemType: ItemType.Media,
     lockActionsStore: true,
-    primaryItems: spotifyMediaItems,
+    primaryItems: {
+        ...spotifyMediaItems,
+        sort: spotifyLikedSongsSort,
+    },
 
     search(): Pager<MediaItem> {
         const market = getMarket();
-        return new SpotifyPager(
+        return new SpotifyClientSortPager(
             async (offset: number, limit: number): Promise<SpotifyPage> => {
                 const {items, total, next} = await spotifyApi.getMySavedTracks({
                     offset,
                     limit,
                     market,
                 });
-                return {items: items.filter(exists).map((item) => item.track), total, next};
+                return {
+                    items: items
+                        .filter(exists)
+                        .map((item) => ({...item.track, added_at: item.added_at})),
+                    total,
+                    next,
+                };
             },
-            undefined,
+            `${spotifyLikedSongs.id}/1`,
+            {pageSize: 50},
             true
         );
     },
@@ -145,18 +208,28 @@ const spotifyLikedAlbums: MediaSource<MediaAlbum> = {
     icon: 'heart',
     itemType: ItemType.Album,
     lockActionsStore: true,
+    primaryItems: {
+        sort: spotifyLikedAlbumsSort,
+    },
 
     search(): Pager<MediaAlbum> {
         const market = getMarket();
-        return new SpotifyPager(
+        return new SpotifyClientSortPager(
             async (offset: number, limit: number): Promise<SpotifyPage> => {
                 const {items, total, next} = await spotifyApi.getMySavedAlbums({
                     offset,
                     limit,
                     market,
                 });
-                return {items: items.filter(exists).map((item) => item.album), total, next};
+                return {
+                    items: items
+                        .filter(exists)
+                        .map((item) => ({...item.album, added_at: item.added_at})),
+                    total,
+                    next,
+                };
             },
+            `${spotifyLikedAlbums.id}/1`,
             {pageSize: 20},
             true
         );
@@ -169,9 +242,15 @@ const spotifyFollowedArtists: MediaSource<MediaArtist> = {
     icon: 'heart',
     itemType: ItemType.Artist,
     lockActionsStore: true,
+    primaryItems: {
+        sort: spotifyLikedArtistsSort,
+    },
+    secondaryItems: {
+        sort: spotifyArtistAlbumsSort,
+    },
 
     search(): Pager<MediaArtist> {
-        return new SpotifyPager(
+        return new SpotifyClientSortPager(
             async (_, limit: number, after: string): Promise<SpotifyPage> => {
                 const options: Record<string, number | string> = {
                     type: 'artist',
@@ -185,8 +264,10 @@ const spotifyFollowedArtists: MediaSource<MediaArtist> = {
                 } = await spotifyApi.getFollowedArtists(options);
                 return {items, total, next: cursors?.after};
             },
+            `${spotifyFollowedArtists.id}/1`,
             undefined,
-            true
+            true,
+            `${spotifyFollowedArtists.id}/2`
         );
     },
 };
@@ -201,7 +282,7 @@ const spotifyPlaylists: MediaSource<MediaPlaylist> = {
 
     search(): Pager<MediaPlaylist> {
         const market = getMarket();
-        return new SpotifyPager(
+        return new SpotifyClientSortPager(
             async (offset: number, limit: number): Promise<SpotifyPage> => {
                 const {items, total, next} = await spotifyApi.getUserPlaylists(
                     spotifySettings.userId,
@@ -209,6 +290,7 @@ const spotifyPlaylists: MediaSource<MediaPlaylist> = {
                 );
                 return {items: items as SpotifyPlaylist[], total, next};
             },
+            `${spotifyPlaylists.id}/1`,
             undefined,
             true
         );

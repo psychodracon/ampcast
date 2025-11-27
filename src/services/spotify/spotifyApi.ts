@@ -3,13 +3,16 @@ import {sleep} from 'utils';
 import {refreshToken} from './spotifyAuth';
 
 export type SpotifyArtist = SpotifyApi.ArtistObjectFull;
-export type SpotifyAlbum = SpotifyApi.AlbumObjectFull;
+export type SpotifyAlbum = SpotifyApi.AlbumObjectFull & {
+    added_at?: string; // ISO string
+};
 export type SpotifyPlaylist = SpotifyApi.PlaylistObjectFull & {
     isChart?: boolean;
 };
 export type SpotifyTrack = SpotifyApi.TrackObjectSimplified &
     Partial<SpotifyApi.TrackObjectFull> & {
         played_at?: string; // ISO string
+        added_at?: string; // ISO string
     };
 export type SpotifyEpisode = SpotifyApi.EpisodeObjectFull & {
     played_at?: string; // ISO string

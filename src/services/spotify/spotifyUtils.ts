@@ -1,3 +1,8 @@
+import {dispatchMetadataChanges} from 'services/metadata';
+import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
+import SimplePager from 'services/pagers/SimplePager';
+import WrappedPager from 'services/pagers/WrappedPager';
+import pinStore from 'services/pins/pinStore';
 import AlbumType from 'types/AlbumType';
 import ItemType from 'types/ItemType';
 import MediaAlbum from 'types/MediaAlbum';
@@ -9,11 +14,6 @@ import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import PlaybackType from 'types/PlaybackType';
 import Thumbnail from 'types/Thumbnail';
-import {dispatchMetadataChanges} from 'services/metadata';
-import SimplePager from 'services/pagers/SimplePager';
-import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
-import WrappedPager from 'services/pagers/WrappedPager';
-import pinStore from 'services/pins/pinStore';
 import {exists, getTextFromHtml} from 'utils';
 import spotify from './spotify';
 import spotifyApi, {
@@ -25,6 +25,7 @@ import spotifyApi, {
     SpotifyPlaylist,
     SpotifyTrack,
 } from './spotifyApi';
+import SpotifyClientSortPager from './SpotifyClientSortPager';
 import SpotifyPager, {SpotifyPage} from './SpotifyPager';
 import spotifySettings from './spotifySettings';
 
@@ -133,10 +134,19 @@ function createMediaAlbum(album: SpotifyAlbum, inLibrary?: boolean | undefined):
                 ?.map((copyright) => copyright.text)
                 .filter((text) => !!text)
                 .join(' | ') || undefined,
+        addedAt: album.added_at ? Math.floor((new Date(album.added_at).getTime() || 0) / 1000) : 0,
     };
 }
 
 function createMediaArtist(artist: SpotifyArtist, inLibrary?: boolean | undefined): MediaArtist {
+    return createSortableMediaArtist(artist, inLibrary);
+}
+
+export function createSortableMediaArtist(
+    artist: any,
+    inLibrary?: boolean | undefined,
+    sortId?: string
+): MediaArtist {
     return {
         itemType: ItemType.Artist,
         src: artist.uri,
@@ -144,8 +154,11 @@ function createMediaArtist(artist: SpotifyArtist, inLibrary?: boolean | undefine
         title: artist.name,
         genres: artist.genres,
         thumbnails: artist.images as Thumbnail[],
-        pager: createArtistAlbumsPager(artist),
+        pager: sortId
+            ? createSortableArtistAlbumsPager(artist, sortId)
+            : createArtistAlbumsPager(artist),
         inLibrary,
+        addedAt: artist.added_at,
     };
 }
 
@@ -205,24 +218,36 @@ function createMediaItemFromTrack(track: SpotifyTrack, inLibrary?: boolean | und
         unplayable: track.is_playable === false ? true : undefined,
         explicit: track.explicit,
         inLibrary,
+        addedAt: track.added_at ? Math.floor((new Date(track.added_at).getTime() || 0) / 1000) : 0,
     };
 }
 
 function createArtistAlbumsPager(artist: SpotifyArtist): Pager<MediaAlbum> {
+    return createSortableArtistAlbumsPager(artist);
+}
+
+export function createSortableArtistAlbumsPager(
+    artist: SpotifyArtist,
+    sortId?: string
+): Pager<MediaAlbum> {
     const market = getMarket();
     const topTracks = createArtistTopTracks(artist);
     const topTracksPager = new SimplePager([topTracks]);
-    const albumsPager = new SpotifyPager<MediaAlbum>(
-        async (offset: number, limit: number): Promise<SpotifyPage> => {
-            const {items, total, next} = await spotifyApi.getArtistAlbums(artist.id, {
-                offset,
-                limit,
-                market,
-                include_groups: 'album,compilation,single',
-            });
-            return {items: items as SpotifyAlbum[], total, next};
-        }
-    );
+
+    const fetchArtistAlbums = async (offset: number, limit: number): Promise<SpotifyPage> => {
+        const {items, total, next} = await spotifyApi.getArtistAlbums(artist.id, {
+            offset,
+            limit,
+            market,
+            include_groups: 'album,compilation,single',
+        });
+        return {items: items as SpotifyAlbum[], total, next};
+    };
+
+    const albumsPager = sortId
+        ? new SpotifyClientSortPager<MediaAlbum>(fetchArtistAlbums, sortId, {pageSize: 50}, false)
+        : new SpotifyPager<MediaAlbum>(fetchArtistAlbums);
+
     return new WrappedPager(topTracksPager, albumsPager);
 }
 
