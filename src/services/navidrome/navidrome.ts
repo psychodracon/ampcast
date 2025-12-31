@@ -24,6 +24,8 @@ import fetchFirstPage, {fetchFirstItem} from 'services/pagers/fetchFirstPage';
 import {t} from 'services/i18n';
 import subsonicScrobbler from 'services/subsonic/factory/subsonicScrobbler';
 import {
+    observeConnecting,
+    observeConnectionLogging,
     observeIsLoggedIn,
     isConnected,
     isLoggedIn,
@@ -90,7 +92,6 @@ const navidrome: PersonalMediaService = {
     compareForRating,
     createPlaylist,
     createSourceFromPin,
-    deletePlaylist,
     editPlaylist,
     getFilters,
     getPlayableUrl,
@@ -101,6 +102,8 @@ const navidrome: PersonalMediaService = {
     rate,
     scrobble,
     store,
+    observeConnecting,
+    observeConnectionLogging,
     observeIsLoggedIn,
     isConnected,
     isLoggedIn,
@@ -196,10 +199,6 @@ function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
             );
         },
     } as MediaSource<T>;
-}
-
-async function deletePlaylist(playlist: MediaPlaylist): Promise<void> {
-    return navidromeApi.deletePlaylist(playlist);
 }
 
 async function editPlaylist(playlist: MediaPlaylist): Promise<MediaPlaylist> {

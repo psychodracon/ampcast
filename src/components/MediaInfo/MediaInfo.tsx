@@ -53,8 +53,9 @@ function MediaItemInfo({item}: MediaInfoProps<MediaItem>) {
                 <Artist artist={item.artists?.join(', ')} />
                 <AlbumAndYear album={item.album} year={item.year} />
                 <Track album={item.album} disc={item.disc} track={item.track} />
-                <StationName stationName={item.stationName} />
+                {item.linearType ? <StationName stationName={item.stationName} /> : null}
                 <Owner owner={item.owner} src={item.src} />
+                <Genre genres={item.genres} />
                 <div className="media-info-icon-bar">
                     <Badges item={item} />
                     <Actions item={item} />
@@ -79,6 +80,7 @@ function AlbumInfo({item: album}: MediaInfoProps<MediaAlbum>) {
                 <TrackCount trackCount={album.trackCount} />
                 <Artist artist={album.artist} />
                 <Year year={album.year} />
+                <Genre genres={album.genres} />
                 <div className="media-info-icon-bar">
                     <Badges item={album} />
                     <Actions item={album} />
@@ -313,7 +315,10 @@ function Year<T extends MediaItem>({year}: Pick<T, 'year'>) {
 }
 
 function Genre<T extends MediaItem>({genres}: Pick<T, 'genres'>) {
-    if (genres) {
+    if (genres?.length) {
+        if (genres.length === 1) {
+            genres = genres[0].split(/\s*[,;/]\s*/);
+        }
         return (
             <p className="genre">
                 <span className="text-label">Genre:</span> {genres.join(', ')}

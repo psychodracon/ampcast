@@ -6,6 +6,7 @@ import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import {Pinnable} from 'types/Pin';
 import PlayAction from 'types/PlayAction';
+import {Logger} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
 import mediaPlayback from 'services/mediaPlayback';
 import pinStore from 'services/pins/pinStore';
@@ -17,9 +18,8 @@ import {showMediaInfoDialog} from 'components/MediaInfo/MediaInfoDialog';
 import {showAddToPlaylistDialog} from './AddToPlaylistDialog';
 import {showCreatePlaylistDialog} from './CreatePlaylistDialog';
 import {showEditPlaylistDialog} from './EditPlaylistDialog';
-import {Logger} from 'utils';
 
-const logger = new Logger('ampcast/performAction');
+const logger = new Logger('performAction');
 
 export default async function performAction<T extends MediaObject>(
     action: Action,
@@ -94,14 +94,16 @@ export default async function performAction<T extends MediaObject>(
                         title: 'Playlists',
                         message: `Delete playlist '${playlist.title}'?`,
                         okLabel: 'Delete',
-                        storageId: 'delete-playlist',
                     });
                     if (confirmed) {
-                        await Promise.all([
-                            service.deletePlaylist(playlist),
-                            pinStore.unpin(playlist),
-                        ]);
-                        removeRecentPlaylist(playlist);
+                        try {
+                            await service.deletePlaylist(playlist);
+                            await pinStore.unpin(playlist);
+                            removeRecentPlaylist(playlist);
+                        } catch (err) {
+                            logger.error(err);
+                            await error('An error occurred while deleting your playlist.');
+                        }
                     }
                 }
             }
@@ -124,7 +126,7 @@ export default async function performAction<T extends MediaObject>(
                             items.length === 1 ? '' : 's'
                         } from playlist '${playlist.title}'?`,
                         okLabel: 'Remove',
-                        storageId: 'remove-from-playlist',
+                        storageId: `remove-from-playlist-${service?.id || ''}`,
                     });
                     if (confirmed) {
                         if (playlist.pager.removeItems) {

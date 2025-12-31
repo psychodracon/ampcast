@@ -45,6 +45,14 @@
         }
     }
 
+    &-localdb {
+        fill: orange;
+
+        .light & {
+            fill: #c65102;
+        }
+    }
+
     &-visualizer {
         color: lime;
 
@@ -167,6 +175,47 @@
             .icon-gonic-primary {
                 fill: #fcbe00;
                 fill-opacity: 1;
+            }
+        }
+    }
+
+    &-ibroadcast {
+        &-dot,
+        &-ib {
+            fill: var(--background-color);
+        }
+
+        .ibroadcast-connected & {
+            &-bg {
+                fill: #134a8e;
+            }
+
+            &-dot {
+                fill: #ecedef;
+            }
+
+            &-ib {
+                fill: white;
+            }
+        }
+
+        .ibroadcast-connected .light &.show-connectivity &-bg {
+            fill: #007bff;
+        }
+
+        &:not(.show-connectivity) {
+            .icon-ibroadcast {
+                &-bg {
+                    fill: #312927;
+                }
+
+                &-dot {
+                    fill: #89878c;
+                }
+
+                &-ib {
+                    fill: #ecedef;
+                }
             }
         }
     }

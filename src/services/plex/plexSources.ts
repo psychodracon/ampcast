@@ -37,6 +37,7 @@ import {
     radiosLayoutSmall,
     recentlyAddedAlbumsLayout,
     recentlyPlayedTracksLayout,
+    topTracksLayout,
 } from 'components/MediaList/layouts';
 
 const serviceId: MediaServiceId = 'plex';
@@ -185,7 +186,7 @@ const plexRecentlyPlayed: MediaSource<MediaItem> = {
     icon: 'clock',
     itemType: ItemType.Media,
     primaryItems: {
-        layout: addRating(recentlyPlayedTracksLayout),
+        layout: recentlyPlayedTracksLayout,
     },
 
     search(): Pager<MediaItem> {
@@ -199,7 +200,7 @@ const plexMostPlayed: MediaSource<MediaItem> = {
     icon: 'most-played',
     itemType: ItemType.Media,
     primaryItems: {
-        layout: addRating(mostPlayedTracksLayout),
+        layout: mostPlayedTracksLayout,
     },
 
     search(): Pager<MediaItem> {
@@ -221,13 +222,7 @@ const plexTopTracks: MediaSource<MediaItem> = {
     itemType: ItemType.Media,
     lockActionsStore: true,
     primaryItems: {
-        layout: {
-            ...plexTracksLayout,
-            card: {
-                ...plexTracksLayout.card,
-                data: 'Rate',
-            },
-        },
+        layout: topTracksLayout,
     },
 
     search(): Pager<MediaItem> {
@@ -253,7 +248,7 @@ const plexTopAlbums: MediaSource<MediaAlbum> = {
             ...plexAlbumsLayout,
             card: {
                 ...albumsLayout.card,
-                data: 'Rate',
+                data: 'Rating',
             },
         },
     },
@@ -282,7 +277,7 @@ const plexTopArtists: MediaSource<MediaArtist> = {
             ...addRating(artistsLayout),
             card: {
                 ...artistsLayout.card,
-                h3: 'Rate',
+                h3: 'Rating',
             },
         },
     },
@@ -768,7 +763,7 @@ export function createSearchPager<T extends MediaObject>(
 function addRating(layout: MediaListLayout): MediaListLayout {
     return {
         ...layout,
-        details: uniq(layout.details.concat('Rate')),
+        details: uniq(layout.details.concat('Rating')),
     };
 }
 

@@ -29,6 +29,7 @@ import {
     recentlyAddedAlbumsLayout,
     recentlyPlayedTracksLayout,
     artistsLayout,
+    topTracksLayout,
 } from 'components/MediaList/layouts';
 
 const serviceId: MediaServiceId = 'navidrome';
@@ -240,13 +241,7 @@ const navidromeTopTracks: MediaSource<MediaItem> = {
     lockActionsStore: true,
     defaultHidden: true,
     primaryItems: {
-        layout: {
-            ...navidromeTracksLayout,
-            card: {
-                ...navidromeTracksLayout.card,
-                data: 'Rate',
-            },
-        },
+        layout: topTracksLayout,
     },
 
     search(): Pager<MediaItem> {
@@ -271,7 +266,7 @@ const navidromeTopAlbums: MediaSource<MediaAlbum> = {
             ...navidromeAlbumsLayout,
             card: {
                 ...navidromeAlbumsLayout.card,
-                data: 'Rate',
+                data: 'Rating',
             },
         },
     },
@@ -298,7 +293,7 @@ const navidromeTopArtists: MediaSource<MediaArtist> = {
             ...addRating(artistsLayout),
             card: {
                 ...artistsLayout.card,
-                h3: 'Rate',
+                h3: 'Rating',
             },
         },
     },
@@ -344,7 +339,7 @@ const navidromeRecentlyPlayed: MediaSource<MediaItem> = {
     icon: 'clock',
     itemType: ItemType.Media,
     primaryItems: {
-        layout: addRating(recentlyPlayedTracksLayout),
+        layout: recentlyPlayedTracksLayout,
     },
 
     search(): Pager<MediaItem> {
@@ -358,7 +353,7 @@ const navidromeMostPlayed: MediaSource<MediaItem> = {
     icon: 'most-played',
     itemType: ItemType.Media,
     primaryItems: {
-        layout: addRating(mostPlayedTracksLayout),
+        layout: mostPlayedTracksLayout,
     },
 
     search(): Pager<MediaItem> {
@@ -637,6 +632,6 @@ function createSearch<T extends MediaObject>(
 function addRating(layout: MediaListLayout): MediaListLayout {
     return {
         ...layout,
-        details: uniq(layout.details.concat('Rate')),
+        details: uniq(layout.details.concat('Rating')),
     };
 }

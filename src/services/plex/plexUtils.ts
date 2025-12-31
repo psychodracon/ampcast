@@ -250,7 +250,10 @@ function createMediaPlaylist(playlist: plex.Playlist, noPager?: boolean): MediaP
         editable: true,
     };
     if (!noPager) {
-        (mediaPlaylist as any).pager = createPager({path: playlist.key});
+        (mediaPlaylist as any).pager = createPager(
+            {path: playlist.key},
+            {autofill: true, pageSize: 1000}
+        );
     }
     return mediaPlaylist as MediaPlaylist;
 }
@@ -290,7 +293,7 @@ export async function getMetadata<T extends plex.MediaObject>(
         return [];
     }
     const ratingObjects = objects.filter(
-        (object: plex.MediaObject): object is plex.RatingObject => 'ratingKey' in object
+        (object: plex.MediaObject): object is plex.RatingObject => !!object.ratingKey
     );
     if (ratingObjects.length > 0) {
         // Map of `object.key` to `object`.
@@ -305,7 +308,7 @@ export async function getMetadata<T extends plex.MediaObject>(
         enhancedObjects.forEach((enhancedObject) => {
             objectMap[enhancedObject.key] = enhancedObject as T;
         });
-        return objects.map((object) => objectMap[object.key]);
+        return objects.map((object) => (object.key ? objectMap[object.key] : object));
     } else {
         return objects;
     }

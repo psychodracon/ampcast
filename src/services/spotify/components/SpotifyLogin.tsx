@@ -1,8 +1,10 @@
 import React from 'react';
 import {LoginProps} from 'components/Login';
+import ConnectionLogging from 'components/Login/ConnectionLogging';
 import CredentialsButton from 'components/Login/CredentialsButton';
 import CredentialsRequired from 'components/Login/CredentialsRequired';
 import LoginButton from 'components/Login/LoginButton';
+import SecureContextRequired from 'components/Login/SecureContextRequired';
 import ServiceLink from 'components/Login/ServiceLink';
 import useCredentials from './useCredentials';
 
@@ -26,25 +28,12 @@ export default function SpotifyLogin({service: spotify}: LoginProps) {
                 </>
             )}
             <ServiceLink service={spotify} />
+            <ConnectionLogging service={spotify} />
         </>
     ) : (
         <>
-            <SecureContextRequired />
+            <SecureContextRequired service={spotify} />
             <ServiceLink service={spotify} />
         </>
-    );
-}
-
-function SecureContextRequired() {
-    return (
-        <div className="note">
-            <p>
-                A <em>secure context</em> is required for Spotify login.
-            </p>
-            <p>
-                Your {__app_name__} application needs to be hosted on a <code>localhost</code> or{' '}
-                <code>https:</code> domain.
-            </p>
-        </div>
     );
 }

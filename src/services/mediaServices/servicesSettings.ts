@@ -14,6 +14,11 @@ type SortingSettings = Record<string, SortParams | undefined>;
 type ViewSettings = Record<string, MediaListLayout['view'] | undefined>;
 
 const storage = new LiteStorage('services');
+
+// "Rate" was renamed to "Rating" (03-12-2025).
+// Old settings may still be imported, so we may need to keep this for a while.
+storage.setItem('fields', storage.getItem('fields')?.replaceAll('"Rate"', '"Rating"') || '');
+
 const initialFieldsSettings = storage.getJson<FieldsSettings>('fields', {});
 const initialHiddenSettings = storage.getJson<HiddenSettings>('hidden', {});
 const initialSortingSettings = storage.getJson<SortingSettings>('sorting', {});

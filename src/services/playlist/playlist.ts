@@ -10,9 +10,9 @@ import {
     skip,
     tap,
 } from 'rxjs';
-import {get as dbRead, set as dbWrite, createStore} from 'idb-keyval';
 import {nanoid} from 'nanoid';
 import ItemType from 'types/ItemType';
+import LinearType from 'types/LinearType';
 import LookupStatus from 'types/LookupStatus';
 import MediaAlbum from 'types/MediaAlbum';
 import MediaItem from 'types/MediaItem';
@@ -31,12 +31,11 @@ import {
 } from 'services/lookup';
 import {observeMetadataChanges, removeUserData} from 'services/metadata';
 import fetchAllTracks from 'services/pagers/fetchAllTracks';
+import playlistStore from './playlistStore';
 
 const logger = new Logger('playlist');
 
-const delayWriteTime = 200;
-
-const playlistStore = createStore('ampcast/playlist', 'keyval');
+const delayWriteTime = 500;
 
 const UNINITIALIZED: PlaylistItem[] = [];
 const items$ = new BehaviorSubject<PlaylistItem[]>(UNINITIALIZED);
@@ -190,6 +189,7 @@ export async function injectAt(items: PlayableType, index: number): Promise<void
     if (additions.length > 0) {
         const newItems = additions.map((item) => ({
             ...removeUserData(item),
+            linearType: item.linearType === LinearType.Station ? item.linearType : undefined,
             playbackType: isDerivedPlaybackType(item) ? undefined : item.playbackType,
             id: nanoid(),
         }));
@@ -313,14 +313,6 @@ function isDerivedPlaybackType(item: MediaItem): boolean {
     return item.playbackType === PlaybackType.HLS && /^(emby|jellyfin|plex):/.test(item.src);
 }
 
-async function safeWrite(key: string, value: any): Promise<void> {
-    try {
-        dbWrite(key, value, playlistStore);
-    } catch (err) {
-        logger.error(err);
-    }
-}
-
 const playlist: Playlist = {
     get atEnd(): boolean {
         return getCurrentIndex() === getSize() - 1;
@@ -363,23 +355,17 @@ if (isMiniPlayer) {
     setCurrentItemId('');
     setItems([]);
 } else {
-    // Load playlist from `IndexedDB`.
+    // Load playlist from browser storage.
     (async () => {
-        try {
-            const [items = [], id = ''] = await Promise.all([
-                dbRead<PlaylistItem[]>('items', playlistStore),
-                dbRead<string>('currently-playing-id', playlistStore),
-            ]);
-            setCurrentItemId(id);
-            setItems(items);
-        } catch (err) {
-            logger.error(err);
-            setCurrentItemId('');
-            setItems([]);
-        }
+        const [items, id] = await Promise.all([
+            playlistStore.getItems(),
+            playlistStore.getCurrentItemId(),
+        ]);
+        setCurrentItemId(id);
+        setItems(items);
     })();
 
-    // Save playlist to `IndexedDB`.
+    // Save playlist to browser storage.
     items$
         .pipe(
             skip(2),
@@ -398,17 +384,17 @@ if (isMiniPlayer) {
                         return item;
                     }
                 });
-                return safeWrite('items', items);
+                return playlistStore.setItems(items);
             })
         )
         .subscribe(logger);
 
-    // Save "currently playing" to `IndexedDB`.
+    // Save "currently playing" to browser storage.
     currentItemId$
         .pipe(
             skip(2),
             debounceTime(delayWriteTime),
-            mergeMap((id) => safeWrite('currently-playing-id', id))
+            mergeMap((id) => playlistStore.setCurrentItemId(id))
         )
         .subscribe(logger);
 

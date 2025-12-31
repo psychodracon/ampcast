@@ -1,6 +1,5 @@
-import {map} from 'rxjs';
+import {distinctUntilChanged, map} from 'rxjs';
 import MiniSearch from 'minisearch';
-import unidecode from 'unidecode';
 import ItemType from 'types/ItemType';
 import MediaItem from 'types/MediaItem';
 import MediaListLayout from 'types/MediaListLayout';
@@ -9,7 +8,9 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import MediaSource, {AnyMediaSource, MediaSourceItems} from 'types/MediaSource';
 import Pager from 'types/Pager';
+import {observePlaybackState} from 'services/mediaPlayback/playback';
 import ObservablePager from 'services/pagers/ObservablePager';
+import WrappedPager from 'services/pagers/WrappedPager';
 import {recentlyPlayedTracksLayout} from 'components/MediaList/layouts';
 import {observeListens} from './listens';
 import playlists, {LocalPlaylistItem} from './playlists';
@@ -64,39 +65,50 @@ export const localScrobbles: MediaSource<MediaItem> = {
     },
 
     search({q = ''}: {q?: string} = {}): Pager<MediaItem> {
-        return new ObservablePager(
-            observeListens().pipe(
-                map((listens) => {
-                    if (q) {
+        const listens$ = observeListens();
+        if (q) {
+            return new ObservablePager(
+                listens$.pipe(
+                    map((listens) => {
                         const listensMap = new Map(
                             listens.toReversed().map((listen) => [listen.src, listen])
                         );
-                        const fields = ['title', 'artists', 'genres', 'src'];
+                        const fields = ['title', 'artist', 'album', 'genre', 'src'];
                         const miniSearch = new MiniSearch({fields});
                         miniSearch.addAll(
                             [...listensMap.values()].map((listen) => ({
                                 id: listen.src,
-                                title: unidecode(listen.title),
-                                artists: unidecode(listen.artists?.join(';') || ''),
-                                genres: listen.genres,
+                                title: listen.title,
+                                artist: listen.artists?.join(';') || '',
+                                album: listen.album || '',
+                                genre: listen.genres,
                                 src: listen.src,
                             }))
                         );
                         return miniSearch
-                            .search(unidecode(q), {
+                            .search(q, {
                                 fields,
                                 fuzzy: 0.2,
                                 prefix: true,
-                                boost: {title: 1.05, genres: 0.25, src: 0.1},
+                                boost: {title: 1.05, album: 0.5, genres: 0.25, src: 0.1},
                             })
                             .map((entry) => listensMap.get(entry.id)!);
-                    } else {
-                        return listens;
-                    }
-                })
-            ),
-            {passive: true}
-        );
+                    })
+                ),
+                {passive: true}
+            );
+        } else {
+            const nowPlaying$ = observePlaybackState().pipe(
+                map(({paused, currentTime, currentItem}) =>
+                    currentItem && (!paused || currentTime > 1) ? [currentItem] : []
+                ),
+                distinctUntilChanged(([a], [b]) => a?.id === b?.id),
+                map((items) => items.map((item) => ({...item, playedAt: -1})))
+            );
+            const listensPager = new ObservablePager(listens$, {passive: true});
+            const nowPlayingPager = new ObservablePager<MediaItem>(nowPlaying$, {passive: true});
+            return new WrappedPager(nowPlayingPager, listensPager);
+        }
     },
 };
 

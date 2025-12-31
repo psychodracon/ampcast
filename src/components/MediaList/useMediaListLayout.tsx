@@ -214,6 +214,8 @@ const Track: RenderField<MediaItem> = (item) => (
     </span>
 );
 
+const Disc: RenderField<MediaItem> = (item) => <Text value={item.disc} />;
+
 const MultiDisc: RenderField<MediaAlbum> = (item) => <Text value={item.multiDisc} />;
 
 const Copyright: RenderField<MediaAlbum | MediaItem> = (item) => <Text value={item.copyright} />;
@@ -246,10 +248,17 @@ const TrackCount: RenderField<MediaPlaylist | MediaAlbum> = (item) => (
 
 const Year: RenderField<MediaAlbum | MediaItem> = (item) => <Text value={item.year || ''} />;
 
-const Genre: RenderField<MediaPlaylist | MediaAlbum | MediaItem> = (item) => (
-    <Text value={item.genres?.join(', ')} />
-);
-
+const Genre: RenderField<MediaPlaylist | MediaAlbum | MediaItem> = (item) => {
+    let genres = item.genres;
+    if (genres?.length) {
+        if (genres.length === 1) {
+            genres = genres[0].split(/\s*[,;/]\s*/);
+        }
+        return <Text value={genres.join(', ')} />;
+    } else {
+        return null;
+    }
+};
 const Owner: RenderField<MediaPlaylist | MediaItem> = (item) => <Text value={item.owner?.name} />;
 
 const FileName: RenderField<MediaFolderItem> = (item) => <Text value={item.fileName} />;
@@ -265,7 +274,7 @@ const LastPlayed: RenderField<MediaPlaylist | MediaAlbum | MediaItem> = (item) =
     if (!item.playedAt) {
         return;
     }
-    if (item.src.endsWith(':listen:now-playing')) {
+    if (item.playedAt === -1) {
         return <span className="text">playing now</span>;
     }
     const date = new Date(item.playedAt * 1000);
@@ -358,7 +367,7 @@ const Thumbnail: RenderField = (item, info) => {
     return <CoverArt item={item} placeholder={info.busy} />;
 };
 
-const Rate: RenderField = (item) => {
+const Rating: RenderField = (item) => {
     const service = getServiceFromSrc(item);
     return service?.canRate?.(item) ? (
         <StarRating
@@ -377,7 +386,7 @@ const Progress: RenderField<MediaPlaylist> = (playlist) => {
     const playlistSize = playlist.trackCount;
     const itemCount = items.reduce((total) => (total += 1), 0);
     const playable = useIsPlaylistPlayable(playlist);
-    return playable ? null : (
+    return playable || playlistSize === 0 ? null : (
         <progress
             max={playlistSize ?? 1}
             value={playlistSize == null ? 0 : itemCount}
@@ -410,6 +419,14 @@ const mediaFields: MediaFields = {
         align: 'right',
         width: 4,
         className: 'index track',
+    },
+    Disc: {
+        id: 'Disc',
+        title: 'Disc',
+        render: Disc,
+        align: 'right',
+        width: 4,
+        className: 'disc',
     },
     Position: {
         id: 'Position',
@@ -556,13 +573,13 @@ const mediaFields: MediaFields = {
         render: Thumbnail,
         className: 'thumbnail',
     },
-    Rate: {
-        id: 'Rate',
+    Rating: {
+        id: 'Rating',
         title: <StarRating value={0} tabIndex={-1} />,
-        render: Rate,
+        render: Rating,
         align: 'right',
         width: 8,
-        className: 'rate',
+        className: 'rating',
     },
     Progress: {
         id: 'Progress',

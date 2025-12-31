@@ -117,7 +117,7 @@ async function handleBundleJs(res, path) {
             personalMediaServers[serverId] = {
                 host,
                 hasProxyLogin: !!(getEnv(`${SERVER_ID}_USER`) && getEnv(`${SERVER_ID}_PASSWORD`)),
-                locked: getEnv(`${SERVER_ID}_LOCKED`) === 'true'
+                locked: getEnv(`${SERVER_ID}_LOCKED`) === 'true',
             };
         }
     });
@@ -125,6 +125,7 @@ async function handleBundleJs(res, path) {
     [
         'APPLE_MUSIC_DEV_TOKEN',
         'GOOGLE_CLIENT_ID',
+        'IBROADCAST_CLIENT_ID',
         'LASTFM_API_KEY',
         'LASTFM_API_SECRET',
         'SPOTIFY_CLIENT_ID',
