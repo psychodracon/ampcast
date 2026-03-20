@@ -1,13 +1,13 @@
-import {mergeMap, tap} from 'rxjs';
+import {mergeMap, of, tap} from 'rxjs';
 import {getSourceSorting, observeSourceSorting} from 'services/mediaServices/servicesSettings';
 import SequentialPager from 'services/pagers/SequentialPager';
 import MediaObject from 'types/MediaObject';
 import {PagerConfig} from 'types/Pager';
 import SortParams from 'types/SortParams';
 import {exists, Logger} from 'utils';
-import {SpotifyPage} from './SpotifyPager';
 import {spotifyApiCallWithRetry} from './spotifyApi';
-import {addUserData, createMediaObject, createSortableMediaArtist} from './spotifyUtils';
+import {SpotifyPage} from './SpotifyPager';
+import {createMediaObject, createSortableMediaArtist} from './spotifyUtils';
 
 const MAX_ITEMS = 2000;
 const FETCH_SIZE = 50;
@@ -30,7 +30,7 @@ export default class SpotifyClientSortPager<T extends MediaObject> extends Seque
         private sortId?: string,
         options?: Partial<PagerConfig>,
         private inLibrary?: boolean,
-        private secondarySortId?: string
+        private secondarySortId?: string,
     ) {
         const {itemKey, ...restOptions} = options || {};
         const pageSize = (options && options.pageSize) || DEFAULT_PAGE_SIZE;
@@ -67,9 +67,12 @@ export default class SpotifyClientSortPager<T extends MediaObject> extends Seque
             if (!this.config.passive) {
                 this.subscribeTo(
                     this.observeAdditions().pipe(
-                        mergeMap((items: readonly T[]) => addUserData(items))
+                        mergeMap((items: readonly T[]) => {
+                            this.addUserData(items);
+                            return of(null);
+                        }),
                     ),
-                    logger
+                    logger,
                 );
             }
 
@@ -81,9 +84,9 @@ export default class SpotifyClientSortPager<T extends MediaObject> extends Seque
                                 this.applySorting(this.allItems, sortParams);
                                 this.resetPagination();
                             }
-                        })
+                        }),
                     ),
-                    logger
+                    logger,
                 );
             }
         }
@@ -103,12 +106,12 @@ export default class SpotifyClientSortPager<T extends MediaObject> extends Seque
         while (hasMore && allItems.length < MAX_ITEMS) {
             try {
                 const page = await spotifyApiCallWithRetry(() =>
-                    this.fetchData(currentOffset, FETCH_SIZE, cursor)
+                    this.fetchData(currentOffset, FETCH_SIZE, cursor),
                 );
 
                 const mediaItems = page.items
                     .filter(exists)
-                    .map((item) => this.createCustomMediaObject(item)) as T[];
+                    .map((item: any) => this.createCustomMediaObject(item)) as T[];
 
                 allItems.push(...mediaItems);
                 hasMore = !!page.next && page.items.length === FETCH_SIZE;

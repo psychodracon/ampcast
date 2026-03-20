@@ -1,7 +1,7 @@
 import type {Observable, Subscribable} from 'rxjs';
 import {
-    EMPTY,
     BehaviorSubject,
+    EMPTY,
     Subject,
     Subscription,
     combineLatest,
@@ -13,6 +13,10 @@ import {
     take,
     tap,
 } from 'rxjs';
+import actionsStore from 'services/actions/actionsStore';
+import {getServiceFromSrc} from 'services/mediaServices';
+import {observeSourceSorting} from 'services/mediaServices/servicesSettings';
+import {observeMetadataChanges} from 'services/metadata';
 import {ConditionalKeys} from 'type-fest';
 import ChildOf from 'types/ChildOf';
 import ItemType from 'types/ItemType';
@@ -21,10 +25,6 @@ import MetadataChange from 'types/MetadataChange';
 import Pager, {PagerConfig} from 'types/Pager';
 import SortParams from 'types/SortParams';
 import {Logger, clamp, exists, uniq} from 'utils';
-import actionsStore from 'services/actions/actionsStore';
-import {observeMetadataChanges} from 'services/metadata';
-import {getServiceFromSrc} from 'services/mediaServices';
-import {observeSourceSorting} from 'services/mediaServices/servicesSettings';
 
 export interface PageFetch {
     readonly index: number;
@@ -39,7 +39,7 @@ let pagerCount = 0;
 
 export type CreateChildPager<T extends MediaObject> = (
     item: T,
-    childSort?: SortParams
+    childSort?: SortParams,
 ) => Pager<ChildOf<T>>;
 
 export default abstract class MediaPager<T extends MediaObject> implements Pager<T> {
@@ -57,7 +57,7 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
 
     constructor(
         protected config: PagerConfig<T>,
-        private readonly createChildPager?: CreateChildPager<T>
+        private readonly createChildPager?: CreateChildPager<T>,
     ) {
         if (__dev__ && !config.pageSize) {
             logger.warn('`pageSize` not specified');
@@ -93,14 +93,14 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
             // Accommodate sparse arrays.
             filter(([items, size]) => items.reduce((total) => (total += 1), 0) === size),
             map(() => undefined),
-            take(1)
+            take(1),
         );
     }
 
     observeError(): Observable<unknown> {
         return this.error$.pipe(
             skipWhile((error) => error === undefined),
-            distinctUntilChanged()
+            distinctUntilChanged(),
         );
     }
 
@@ -111,7 +111,7 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
     observeSize(): Observable<number> {
         return this.size$.pipe(
             skipWhile((size) => size === -1),
-            distinctUntilChanged()
+            distinctUntilChanged(),
         );
     }
 
@@ -284,33 +284,33 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
             if (!this.passive) {
                 this.subscribeTo(
                     this.observeAdditions().pipe(tap((items) => this.addMultiDisc(items))),
-                    logger
+                    logger,
                 );
 
                 this.subscribeTo(
                     this.observeAdditions().pipe(tap((items) => this.addTrackCount(items))),
-                    logger
+                    logger,
                 );
 
                 this.subscribeTo(
                     this.observeAdditions().pipe(tap((items) => this.addUserData(items))),
-                    logger
+                    logger,
                 );
 
                 this.subscribeTo(
                     observeMetadataChanges<T>().pipe(
-                        tap((changes) => this.applyMetadataChanges(changes))
+                        tap((changes) => this.applyMetadataChanges(changes)),
                     ),
-                    logger
+                    logger,
                 );
             }
 
             if (this.childSortId && this.createChildPager) {
                 this.subscribeTo(
                     observeSourceSorting(this.childSortId).pipe(
-                        tap((childSort) => this.updateChildSort(this.createChildPager!, childSort))
+                        tap((childSort) => this.updateChildSort(this.createChildPager!, childSort)),
                     ),
-                    logger
+                    logger,
                 );
             }
 
@@ -406,15 +406,15 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
                                 const items = this.items.slice();
                                 const item = items[index];
                                 const discs = uniq(
-                                    tracks.map((track) => track.disc).filter(exists)
+                                    tracks.map((track) => track.disc).filter(exists),
                                 );
                                 const multiDisc = discs.length > 1 || discs[0] > 1;
                                 items[index] = {...item, multiDisc};
                                 this.items$.next(items);
                             }
-                        })
+                        }),
                     ),
-                    logger
+                    logger,
                 );
             }
         });
@@ -438,15 +438,15 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
                                 items[index] = {...item, trackCount: size};
                                 this.items$.next(items);
                             }
-                        })
+                        }),
                     ),
-                    logger
+                    logger,
                 );
             }
         });
     }
 
-    private addUserData(items: readonly T[]): void {
+    public addUserData(items: readonly T[]): void {
         const service = getServiceFromSrc(items[0]);
         service?.addUserData?.(items);
     }
