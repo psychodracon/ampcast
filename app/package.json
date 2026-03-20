@@ -1,7 +1,7 @@
 {
     "name": "ampcast-app",
     "productName": "ampcast",
-    "version": "0.9.24",
+    "version": "0.9.26",
     "description": "Ampcast music player",
     "homepage": "https://ampcast.app",
     "repository": {
@@ -23,7 +23,7 @@
     },
     "devDependencies": {
         "@electron/notarize": "^3.1.0",
-        "electron": "github:castlabs/electron-releases#v37.6.0+wvcus",
+        "electron": "github:castlabs/electron-releases#v39.2.7+wvcus",
         "electron-builder": "^26.0.12"
     },
     "dependencies": {

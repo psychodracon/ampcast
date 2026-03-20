@@ -3,7 +3,7 @@
 .media-controls {
     font-family: var(--system-font-family);
 
-    .current-time-control,
+    .time-control,
     .playback-control,
     .volume-control,
     .media-buttons,
@@ -13,26 +13,60 @@
         align-items: center;
     }
 
-    .current-time-control,
+    .volume-control {
+        flex: auto;
+
+        .icon-button {
+            --border-width: calc(var(--media-button-border-width, 1) * 0.046875em);
+            flex: initial;
+            width: calc(1.25em + 2 * var(--border-width));
+            height: calc(1.25em + 2 * var(--border-width));
+            border-radius: calc(var(--roundness) * 100%);
+            outline-offset: 0;
+        }
+
+        input[type=range] {
+            --track-height: 0.175em;
+            --thumb-width: calc(1em + 2 * var(--border-width));
+            --thumb-height: calc(1em + 2 * var(--border-width));
+            max-width: calc(4.5em + 2 * var(--border-width));
+        }
+    }
+
+
+    .time-control,
     .playback-control {
         margin-bottom: var(--gutter-width);
     }
 
     input[type=range] {
+        --border-width: calc(var(--media-button-border-width, 1) * 0.046875em);
         color: inherit;
 
         @mixin media-thumb {
-            background-color: var(--media-button-color);
-            background-image: var(--media-button-background);
-            box-shadow: 0 0 1px 1px var(--black);
-            border-radius: calc(var(--roundness) * var(--thumb-size));
+            @include effects.button;
+            --amb-light-hue: var(--media-button-color-h);
+            --amb-light-saturation: var(--media-button-color-s);
+            --amb-key-light-intensity: var(--media-button-color-l2);
+            --amb-chamfer: var(--media-button-chamfer);
+            --amb-fillet: var(--media-button-fillet);
+            --amb-elevation: var(--media-button-elevation);
+            --hover-light-intensity: min(calc(var(--media-button-color-l2) + 0.05), 1);
+            --active-light-intensity: max(calc(var(--media-button-color-l2) - 0.05), 0);
+            --thumb-shadow: none;
+            border:
+                var(--border-width)
+                solid
+                var(--media-button-border-color, var(--black));
+            border-radius: calc(var(--roundness) * var(--thumb-height));
+            @include effects.pressable;
 
-            &:hover {
-                filter: brightness(1.1);
+            .media-buttons-concave & {
+                @include effects.concave;
             }
 
-            &:active {
-                filter: brightness(0.95);
+            .media-buttons-convex & {
+                @include effects.convex;
             }
         }
 
@@ -47,8 +81,8 @@
 
     .media-buttons {
         flex: auto;
-        margin-left: 0.25rem;
-        margin-right: 0.25rem;
+        margin-left: 0.5rem;
+        margin-right: 0.5rem;
     }
 
     time {
@@ -63,6 +97,9 @@
     }
 
     #playhead {
+        --border-width: calc(var(--media-button-border-width, 1) * 0.0546875em);
+        --thumb-width: calc(1.25em + 2 * var(--border-width));
+        --thumb-height: calc(1.25em + 2 * var(--border-width));
         display: flex;
         flex: auto;
         min-width: 4rem;
@@ -71,14 +108,10 @@
         @mixin smiley-thumb {
             background-repeat: no-repeat;
             background-position: center;
-            background-size: var(--thumb-size);
+            background-size: var(--thumb-height);
             background-image:
                 var(--smiley),
-                var(--media-button-background);
-
-            .app.flat & {
-                background-image: var(--smiley);
-            }
+                var(--surface-image);
         }
 
         &:disabled {

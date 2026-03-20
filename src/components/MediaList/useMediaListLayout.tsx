@@ -4,6 +4,7 @@ import Action from 'types/Action';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
+import MediaArtist from 'types/MediaArtist';
 import MediaFolderItem from 'types/MediaFolderItem';
 import MediaItem from 'types/MediaItem';
 import MediaListLayout, {Field} from 'types/MediaListLayout';
@@ -15,16 +16,21 @@ import {getServiceFromSrc} from 'services/mediaServices';
 import {setSourceFields} from 'services/mediaServices/servicesSettings';
 import {ColumnSpec, ListViewLayout} from 'components/ListView';
 import DefaultActions, {ActionsProps, performAction} from 'components/Actions';
-import {ExplicitBadge, getAlbumTypeText, LivePlaybackBadge} from 'components/Badges';
+import {
+    Badge,
+    BitRateBadge,
+    ExplicitBadge,
+    getAlbumTypeText,
+    LivePlaybackBadge,
+} from 'components/Badges';
 import CoverArt from 'components/CoverArt';
-import Icon, {IconName} from 'components/Icon';
-import PopupMenuButton from 'components/Button/PopupMenuButton';
+import Icon, {IconName, Flag} from 'components/Icon';
+import {PopupMenuButton} from 'components/Button';
 import MediaSourceLabel from 'components/MediaSources/MediaSourceLabel';
 import StarRating from 'components/StarRating';
 import SunClock from 'components/SunClock';
 import Time from 'components/Time';
 import usePager from 'hooks/usePager';
-import useIsPlaylistPlayable from 'hooks/useIsPlaylistPlayable';
 import useMediaListFields from './useMediaListFields';
 import useMediaListView from './useMediaListView';
 import showDetailsMenu from './showDetailsMenu';
@@ -180,7 +186,7 @@ const Title: RenderField = (item) => {
     );
 };
 
-const IconTitle: RenderField = (item) => {
+export const IconTitle: RenderField = (item, info) => {
     const [serviceId] = item.src.split(':');
     let icon: IconName;
     if (
@@ -192,7 +198,7 @@ const IconTitle: RenderField = (item) => {
     } else {
         icon = serviceId as IconName;
     }
-    return <MediaSourceLabel icon={icon} text={item.title} />;
+    return <MediaSourceLabel icon={icon} text={Title(item, info)} />;
 };
 
 const BitRate: RenderField<MediaItem> = (item) => <Text value={item.bitRate} />;
@@ -239,7 +245,7 @@ const Duration: RenderField<MediaPlaylist | MediaItem> = (item) => (
 );
 
 const PlayCount: RenderField<MediaPlaylist | MediaAlbum | MediaItem> = (item) => (
-    <Text value={getPlayCount(item.playCount)} />
+    <Text value={getCountString(item.playCount)} />
 );
 
 const TrackCount: RenderField<MediaPlaylist | MediaAlbum> = (item) => (
@@ -267,7 +273,7 @@ const Views: RenderField = (item) => {
     if (item.globalPlayCount == null) {
         return null;
     }
-    return <Text value={getGlobalPlayCount(item.globalPlayCount, 'view')} />;
+    return <Text value={getCountStringWithLabel(item.globalPlayCount, 'view')} />;
 };
 
 const LastPlayed: RenderField<MediaPlaylist | MediaAlbum | MediaItem> = (item) => {
@@ -354,8 +360,8 @@ const FileIcon: RenderField<MediaFolderItem> = (item: MediaFolderItem, info) => 
                 ? 'file-video'
                 : 'file-audio'
             : info.rowIndex === 0 && item.fileName.startsWith('../')
-            ? 'folder-up'
-            : 'folder';
+              ? 'folder-up'
+              : 'folder';
     return (
         <figure className="cover-art">
             <Icon className="cover-art-image" name={icon} />
@@ -382,11 +388,10 @@ const Rating: RenderField = (item) => {
 };
 
 const Progress: RenderField<MediaPlaylist> = (playlist) => {
-    const [{items}] = usePager(playlist.pager);
+    const [{items, complete}] = usePager(playlist.pager);
     const playlistSize = playlist.trackCount;
     const itemCount = items.reduce((total) => (total += 1), 0);
-    const playable = useIsPlaylistPlayable(playlist);
-    return playable || playlistSize === 0 ? null : (
+    return complete || playlistSize === 0 ? null : (
         <progress
             max={playlistSize ?? 1}
             value={playlistSize == null ? 0 : itemCount}
@@ -396,6 +401,26 @@ const Progress: RenderField<MediaPlaylist> = (playlist) => {
                     : `${Math.round((itemCount * 100) / playlistSize)}%`
             }
         />
+    );
+};
+
+const Badges: RenderField<MediaItem> = (item) => {
+    return (
+        <div className="badges">
+            <BitRateBadge item={item} />
+            {item.badge ? <Badge>{item.badge}</Badge> : null}
+        </div>
+    );
+};
+
+export const Country: RenderField<MediaItem | MediaArtist> = (item) => {
+    return item.country && item.countryCode ? (
+        <>
+            <Flag country={item.countryCode} />
+            <Text value={item.country} />
+        </>
+    ) : (
+        <Text value={item.country} />
     );
 };
 
@@ -588,6 +613,18 @@ const mediaFields: MediaFields = {
         className: 'progress',
         width: 8,
     },
+    Badges: {
+        id: 'Badges',
+        title: 'Badges',
+        render: Badges,
+        className: 'inline-badges',
+    },
+    Country: {
+        id: 'Country',
+        title: 'Country',
+        render: Country,
+        className: 'country',
+    },
 };
 
 function getCount(count?: number): string {
@@ -598,30 +635,26 @@ function getCount(count?: number): string {
     return isNaN(value) ? '' : value.toLocaleString();
 }
 
-function getGlobalPlayCount(
-    globalPlayCount = 0,
-    countName = 'listen',
-    countNamePlural = countName + 's'
-): string {
-    if (globalPlayCount === 1) {
-        return `1 ${countName}`;
+function getCountString(count = 0): string {
+    if (count < 10_000) {
+        return getCount(count);
+    } else if (count < 100_000) {
+        return `${(count / 1000).toFixed(1).replace('.0', '')}K`;
+    } else if (count < 1_000_000) {
+        return `${Math.round(count / 1000)}K`;
+    } else if (count < 100_000_000) {
+        return `${(count / 1_000_000).toFixed(1).replace('.0', '')}M`;
+    } else if (count < 1_000_000_000) {
+        return `${Math.round(count / 1_000_000)}M`;
     } else {
-        return `${getPlayCount(globalPlayCount)} ${countNamePlural}`;
+        return `${(count / 1_000_000_000).toFixed(1).replace('.0', '')}B`;
     }
 }
 
-function getPlayCount(playCount = 0): string {
-    if (playCount < 10_000) {
-        return getCount(playCount);
-    } else if (playCount < 100_000) {
-        return `${(playCount / 1000).toFixed(1).replace('.0', '')}K`;
-    } else if (playCount < 1_000_000) {
-        return `${Math.round(playCount / 1000)}K`;
-    } else if (playCount < 100_000_000) {
-        return `${(playCount / 1_000_000).toFixed(1).replace('.0', '')}M`;
-    } else if (playCount < 1_000_000_000) {
-        return `${Math.round(playCount / 1_000_000)}M`;
+function getCountStringWithLabel(count = 0, label: string, labelPlural = label + 's'): string {
+    if (count === 1) {
+        return `1 ${label}`;
     } else {
-        return `${(playCount / 1_000_000_000).toFixed(1).replace('.0', '')}B`;
+        return `${getCountString(count)} ${labelPlural}`;
     }
 }

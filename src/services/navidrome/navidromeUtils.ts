@@ -1,3 +1,4 @@
+import {nanoid} from 'nanoid';
 import {SetOptional, Writable} from 'type-fest';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
@@ -11,12 +12,13 @@ import Pager from 'types/Pager';
 import PlaybackType from 'types/PlaybackType';
 import SortParams from 'types/SortParams';
 import Thumbnail from 'types/Thumbnail';
-import {getTextFromHtml} from 'utils';
+import {getMediaObjectId, getTextFromHtml} from 'utils';
 import {MAX_DURATION} from 'services/constants';
 import SimplePager from 'services/pagers/SimplePager';
 import WrappedPager from 'services/pagers/WrappedPager';
 import pinStore from 'services/pins/pinStore';
-import NavidromeIndexedPager from './NavidromeIndexedPager';
+import stationStore from 'services/internetRadio/stationStore';
+import NavidromeIndexedPager, {NavidromePlaylistItemsPager} from './NavidromeIndexedPager';
 import navidromeSettings from './navidromeSettings';
 
 export function createMediaObject<T extends MediaObject>(
@@ -37,7 +39,7 @@ export function createMediaObject<T extends MediaObject>(
 
         default:
             if (isRadio) {
-                return createRadioItem(item as Navidrome.Radio) as T;
+                return createRadioStation(item as Navidrome.Radio) as T;
             } else {
                 return createMediaItem(item as Navidrome.Song) as T;
             }
@@ -70,21 +72,7 @@ export function createPlaylistItemsPager(
     playlist: MediaPlaylist,
     itemSort?: SortParams
 ): Pager<MediaItem> {
-    const id = getMediaObjectId(playlist);
-    return new NavidromeIndexedPager(
-        ItemType.Media,
-        `playlist/${id}/tracks`,
-        {
-            playlist_id: id,
-            ...(itemSort
-                ? {
-                      _sort: itemSort.sortBy,
-                      _order: itemSort.sortOrder === -1 ? 'DESC' : 'ASC',
-                  }
-                : {}),
-        },
-        {autofill: true, pageSize: 1000}
-    );
+    return new NavidromePlaylistItemsPager(playlist, itemSort);
 }
 
 function createMediaItem(song: Navidrome.Song): MediaItem {
@@ -102,6 +90,8 @@ function createMediaItem(song: Navidrome.Song): MediaItem {
         album: song.album === '[Unknown Album]' ? undefined : song.album,
         duration: song.duration,
         track: song.trackNumber,
+        nanoId: nanoid(), // For playlists
+        playlistItemId: song.playlistId ? song.id : undefined,
         position: song.playlistId ? Number(song.id) || 0 : undefined,
         disc: song.discNumber,
         rating: song.rating || 0,
@@ -127,12 +117,13 @@ function createMediaItem(song: Navidrome.Song): MediaItem {
     };
 }
 
-function createRadioItem(radio: Navidrome.Radio): MediaItem {
+function createRadioStation(radio: Navidrome.Radio): MediaItem {
+    const src = `navidrome:radio:${radio.id}`;
     return {
+        src,
         itemType: ItemType.Media,
         mediaType: MediaType.Audio,
         linearType: LinearType.Station,
-        src: `navidrome:radio:${radio.id}`,
         srcs: [radio.streamUrl],
         externalUrl: radio.homePageUrl,
         title: radio.name,
@@ -140,6 +131,7 @@ function createRadioItem(radio: Navidrome.Radio): MediaItem {
         duration: MAX_DURATION,
         playedAt: 0,
         isExternalMedia: true,
+        isFavoriteStation: stationStore.isFavorite({src}),
     };
 }
 
@@ -190,6 +182,7 @@ function createMediaPlaylist(playlist: Navidrome.Playlist, itemSort?: SortParams
     const playlist_id = playlist.id;
     const src = `navidrome:playlist:${playlist_id}`;
     const owned = playlist.ownerId === navidromeSettings.userId;
+    const smart = !!playlist.rules;
 
     const mediaPlaylist: Writable<SetOptional<MediaPlaylist, 'pager'>> = {
         itemType: ItemType.Playlist,
@@ -205,11 +198,16 @@ function createMediaPlaylist(playlist: Navidrome.Playlist, itemSort?: SortParams
         isPinned: pinStore.isPinned(src),
         public: playlist.public,
         owned,
-        owner: {
-            name: playlist.ownerName,
-        },
+        owner: {name: playlist.ownerName},
         editable: owned,
-        // deletable: owned, // TODO
+        items:
+            owned && !smart
+                ? {
+                      deletable: true,
+                      droppable: true,
+                      moveable: true,
+                  }
+                : undefined,
     };
     mediaPlaylist.pager = createPlaylistItemsPager(mediaPlaylist as MediaPlaylist, itemSort);
     return mediaPlaylist as MediaPlaylist;
@@ -256,11 +254,6 @@ function createAllTracksPager(artist: MediaArtist): Pager<MediaItem> {
 
 function getExternalUrl(id: string): string {
     return `${navidromeSettings.host}/app/#/${id}/show`;
-}
-
-function getMediaObjectId(object: MediaObject): string {
-    const [, , id] = object.src.split(':');
-    return id;
 }
 
 function parseDate(date: string): number {

@@ -1,3 +1,4 @@
+import type {Observable} from 'rxjs';
 import CreatePlaylistOptions from 'types/CreatePlaylistOptions';
 import ItemType from 'types/ItemType';
 import FilterType from 'types/FilterType';
@@ -61,9 +62,13 @@ const ibroadcast: PersonalMediaService = {
     editablePlaylists: ibroadcastPlaylists,
     root: ibroadcastSearch,
     sources: ibroadcastSources,
+    get isLibraryLoading(): boolean {
+        return ibroadcastLibrary.loading;
+    },
     get libraryId(): string {
         return ibroadcastLibrary.id;
     },
+    observeIsLibraryLoading,
     observeLibraryId: () => ibroadcastLibrary.observeId(),
     addMetadata,
     addToPlaylist,
@@ -78,10 +83,9 @@ const ibroadcast: PersonalMediaService = {
     getPlayableUrl,
     getPlaybackType,
     getPlaylistByName,
+    loadLibrary,
     lookup,
-    movePlaylistItems,
     rate,
-    removePlaylistItems,
     observeConnecting,
     observeConnectionLogging,
     observeIsLoggedIn,
@@ -94,6 +98,10 @@ const ibroadcast: PersonalMediaService = {
 };
 
 export default ibroadcast;
+
+function observeIsLibraryLoading(): Observable<boolean> {
+    return ibroadcastLibrary.observeLoading();
+}
 
 async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
     if (!canRate(item) || item.rating !== undefined) {
@@ -238,6 +246,10 @@ async function getPlaylistByName(name: string): Promise<MediaPlaylist | undefine
     return ibroadcastLibrary.getPlaylistByName(name);
 }
 
+async function loadLibrary(): Promise<void> {
+    await ibroadcastLibrary.load();
+}
+
 async function lookup(
     artist: string,
     title: string,
@@ -256,15 +268,6 @@ async function lookup(
     return fetchFirstPage(pager, {timeout});
 }
 
-async function movePlaylistItems(
-    playlist: MediaPlaylist,
-    items: readonly MediaItem[],
-    toIndex: number
-): Promise<void> {
-    const id = getIdFromSrc(playlist);
-    return ibroadcastLibrary.movePlaylistTracks(id, items.map(getIdFromSrc), toIndex);
-}
-
 async function rate(item: MediaObject, rating: number): Promise<void> {
     const id = getIdFromSrc(item);
     switch (item.itemType) {
@@ -277,12 +280,4 @@ async function rate(item: MediaObject, rating: number): Promise<void> {
         case ItemType.Media:
             return ibroadcastLibrary.rateTrack(id, rating);
     }
-}
-
-async function removePlaylistItems(
-    playlist: MediaPlaylist,
-    items: readonly MediaItem[]
-): Promise<void> {
-    const id = getIdFromSrc(playlist);
-    return ibroadcastLibrary.removePlaylistTracks(id, items.map(getIdFromSrc));
 }

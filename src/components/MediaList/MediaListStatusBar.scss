@@ -1,10 +1,30 @@
 .media-list-status-bar {
     line-height: normal;
-    
-    p {
+    display: flex;
+    flex-direction: row;
+
+    &-text,
+    &-icons {
         display: flex;
         flex-direction: row;
         align-items: center;
+    }
+
+    &-text {
+        flex: auto;
+        max-width: 100%;
+        overflow: hidden;
+        margin-right: 0.5em;
+
+        .message {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    }
+
+    &-icons {
+        flex: initial;
+        margin-left: auto;
     }
 
     .progress-ring {
@@ -13,5 +33,26 @@
 
     .message.error {
         color: inherit;
+    }
+
+    .permission {
+        display: inline-flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 0 0.375em;
+        border: 1px inset var(--frame-text-color);
+        border-radius: calc(var(--roundness) * 1em);
+        font-size: 0.875em;
+        font-variant: small-caps;
+
+        .dark & {            
+            opacity: 0.75;
+        }
+
+        & ~ .permission {
+            margin-left: 0.5em;
+        }
     }
 }

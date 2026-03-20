@@ -162,12 +162,11 @@ export function createMediaPlaylist(
         editable: true,
         deletable: true,
         genres: getGenres('playlists', playlist, library, true),
-        // TODO
-        // items: {
-        //     deletable: true,
-        //     droppable: true,
-        //     moveable: true,
-        // },
+        items: {
+            deletable: true,
+            droppable: true,
+            moveable: true,
+        },
     };
     mediaPlaylist.pager = createPlaylistItemsPager(mediaPlaylist as MediaPlaylist, itemSort);
     return mediaPlaylist as MediaPlaylist;
@@ -276,7 +275,7 @@ function getTrackGenres(
 ): readonly string[] | undefined {
     let genres: string[] | undefined;
     const map = library.tracks.map;
-    const genre: string = track[map.genre];
+    const genre: string = track?.[map.genre];
     if (genre) {
         genres = [genre];
         const genres_additional: string[] | undefined = track[map.genres_additional];

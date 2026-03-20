@@ -1,5 +1,14 @@
 import type {Observable} from 'rxjs';
-import {BehaviorSubject, Subject, filter, fromEvent, map, skipWhile, tap} from 'rxjs';
+import {
+    BehaviorSubject,
+    Subject,
+    distinctUntilChanged,
+    filter,
+    fromEvent,
+    map,
+    skipWhile,
+    tap,
+} from 'rxjs';
 import MiniSearch from 'minisearch';
 import MediaFilter from 'types/MediaFilter';
 import MediaPlaylist from 'types/MediaPlaylist';
@@ -48,9 +57,10 @@ export interface IBroadcastLibraryQuery<T extends iBroadcast.LibrarySection> {
 export class IBroadcastLibrary {
     private readonly change$ = new Subject<IBroadcastLibraryChange>();
     private readonly id$ = new BehaviorSubject(1);
+    private readonly loading$ = new BehaviorSubject(true);
     private readonly searchFields = ['title', 'artist', 'album', 'genre'];
     // Caches.
-    private response: iBroadcast.LibraryResponse | undefined;
+    private libraryPromise: Promise<iBroadcast.Library> | undefined;
     private albumsDiscIds: Record<string, readonly string[]> | undefined = undefined;
     private decades: Partial<Record<'albums' | 'tracks', readonly MediaFilter[]>> = {};
     private genres: Partial<Record<iBroadcast.LibrarySection, readonly MediaFilter[]>> = {};
@@ -81,6 +91,10 @@ export class IBroadcastLibrary {
         return this.id$.pipe(map((id) => String(id)));
     }
 
+    observeLoading(): Observable<boolean> {
+        return this.loading$.pipe(distinctUntilChanged());
+    }
+
     observePlaylistsChanges(): Observable<IBroadcastLibraryChange<'playlists'>> {
         return this.observeChanges('playlists').pipe(filter((change) => change.type === 'section'));
     }
@@ -103,17 +117,24 @@ export class IBroadcastLibrary {
         return String(this.id$.value);
     }
 
-    async load(): Promise<iBroadcast.Library> {
-        if (!this.response) {
-            this.response = await ibroadcastApi.getLibrary();
-        }
-        return this.response.library;
+    get loading(): boolean {
+        return this.loading$.value;
     }
 
-    async reload(): Promise<void> {
-        this.clear();
-        await this.load();
-        this.id$.next(this.id$.value + 1);
+    load(): Promise<iBroadcast.Library> {
+        if (!this.libraryPromise) {
+            this.loading$.next(true);
+            this.libraryPromise = ibroadcastApi.getLibrary();
+            this.libraryPromise.then(() => this.loading$.next(false));
+        }
+        return this.libraryPromise!;
+    }
+
+    reload(): void {
+        if (!this.loading) {
+            this.clear();
+            this.load().then(() => this.id$.next(this.id$.value + 1));
+        }
     }
 
     async addToPlaylist(
@@ -309,34 +330,6 @@ export class IBroadcastLibrary {
         return albums[discs[0]][albums.map.disc] > 1;
     }
 
-    async movePlaylistTracks(
-        id: number,
-        tracksToMove: readonly number[],
-        beforeIndex: number
-    ): Promise<void> {
-        const library = await this.load();
-        const playlists = library.playlists;
-        const playlist = library.playlists[id];
-        if (playlist) {
-            const map = playlists.map;
-            const currentTracks: readonly number[] = playlist[map.tracks] || [];
-            const beforeId = currentTracks[beforeIndex];
-            if (tracksToMove.includes(beforeId)) {
-                // selection hasn't moved
-                return;
-            }
-            const newTracks = currentTracks.filter((id) => !tracksToMove.includes(id));
-            if (beforeIndex >= 0) {
-                newTracks.splice(beforeIndex, 0, ...tracksToMove);
-            } else {
-                newTracks.push(...tracksToMove);
-            }
-            await this.updatePlaylistTracks(id, newTracks);
-        } else {
-            throw Error('Playlist not found');
-        }
-    }
-
     async query<T extends iBroadcast.LibrarySection>({
         section,
         filter,
@@ -364,32 +357,20 @@ export class IBroadcastLibrary {
     async rateAlbum(id: number, rating: number): Promise<void> {
         const library = await this.load();
         const discs = this.getAlbumDiscIds(library, id);
-        discs.forEach((id) => this.updateRating('albums', Number(id), rating));
+        discs.forEach((id) => this.updateRating(library, 'albums', Number(id), rating));
         await Promise.all(discs.map((id) => ibroadcastApi.rateAlbum(Number(id), rating)));
     }
 
     async rateArtist(id: number, rating: number): Promise<void> {
-        this.updateRating('artists', id, rating);
+        const library = await this.load();
+        this.updateRating(library, 'artists', id, rating);
         await ibroadcastApi.rateArtist(id, rating);
     }
 
     async rateTrack(id: number, rating: number): Promise<void> {
-        this.updateRating('tracks', id, rating);
-        await ibroadcastApi.rateTrack(id, rating);
-    }
-
-    async removePlaylistTracks(id: number, tracksToRemove: readonly number[]): Promise<void> {
         const library = await this.load();
-        const playlists = library.playlists;
-        const playlist = playlists[id];
-        if (playlist) {
-            const map = playlists.map;
-            const currentTracks: readonly number[] = playlist[map.tracks] || [];
-            const newTracks = currentTracks.filter((id) => !tracksToRemove.includes(id));
-            await this.updatePlaylistTracks(id, newTracks);
-        } else {
-            throw Error('Playlist not found');
-        }
+        this.updateRating(library, 'tracks', id, rating);
+        await ibroadcastApi.rateTrack(id, rating);
     }
 
     async scrobble(id: number, event: 'play' | 'skip', timeStamp: number): Promise<void> {
@@ -449,12 +430,50 @@ export class IBroadcastLibrary {
         }
     }
 
+    async updatePlaylistTracks(id: number, tracks: readonly number[]): Promise<void> {
+        try {
+            const library = await this.load();
+            const playlists = library.playlists;
+            const playlist = playlists[id];
+            if (playlist) {
+                tracks = uniq(tracks);
+                const map = playlists.map;
+                const prevTracks: number[] = playlist[map.tracks] || [];
+                (playlist as any)[map.tracks] = tracks;
+                this.dispatchDataChange(library, 'playlists', id, ['tracks']);
+                dispatchMetadataChanges({
+                    match: (item) => item.src === `ibroadcast:playlist:${id}`,
+                    values: {
+                        trackCount: tracks.length,
+                        genres: getGenres('playlists', playlist, library, true),
+                    },
+                });
+                try {
+                    await ibroadcastApi.updatePlaylistTracks(id, tracks);
+                } catch (err) {
+                    if (tracks.length === 0 && prevTracks.length !== 0) {
+                        // Clearing playlists is currently not working. So reduce to a single track.
+                        await ibroadcastApi.updatePlaylistTracks(id, [prevTracks[0]]);
+                    } else {
+                        throw err;
+                    }
+                }
+            } else {
+                throw Error('Playlist not found');
+            }
+        } catch (err) {
+            logger.info('Failed to update playlist', `(id=${id})`);
+            logger.error(err);
+        }
+    }
+
     private clear(): void {
-        this.response = undefined;
+        this.libraryPromise = undefined;
         this.albumsDiscIds = undefined;
         this.decades = {};
         this.genres = {};
         this.searches = {};
+        this.loading$.next(true);
     }
 
     private dispatchDataChange<T extends iBroadcast.LibrarySection>(
@@ -467,9 +486,9 @@ export class IBroadcastLibrary {
             type: 'data',
             library,
             section,
+            map: library[section].map,
             id,
             fields: fields as any,
-            map: library[section].map,
         });
     }
 
@@ -587,55 +606,16 @@ export class IBroadcastLibrary {
         return this.searches[section];
     }
 
-    private async updatePlaylistTracks(id: number, tracks: readonly number[]): Promise<void> {
-        try {
-            const library = await this.load();
-            const playlists = library.playlists;
-            const playlist = playlists[id];
-            if (playlist) {
-                tracks = uniq(tracks);
-                const map = playlists.map;
-                const prevTracks: number[] = playlist[map.tracks] || [];
-                (playlist as any)[map.tracks] = tracks;
-                this.dispatchDataChange(library, 'playlists', id, ['tracks']);
-                dispatchMetadataChanges({
-                    match: (item) => item.src === `ibroadcast:playlist:${id}`,
-                    values: {
-                        trackCount: tracks.length,
-                        genres: getGenres('playlists', playlist, library, true),
-                    },
-                });
-                try {
-                    await ibroadcastApi.updatePlaylistTracks(id, tracks);
-                } catch (err) {
-                    if (tracks.length === 0 && prevTracks.length !== 0) {
-                        // Clearing playlists is currently not working. So reduce to a single track.
-                        await ibroadcastApi.updatePlaylistTracks(id, [prevTracks[0]]);
-                    } else {
-                        throw err;
-                    }
-                }
-            } else {
-                throw Error('Playlist not found');
-            }
-        } catch (err) {
-            logger.info('Failed to update playlist', `(id=${id})`);
-            logger.error(err);
-        }
-    }
-
     private updateRating<T extends iBroadcast.RateableLibrarySection>(
+        library: iBroadcast.Library,
         section: T,
         id: number,
         rating: number
     ): void {
-        const library = this.response?.library;
-        if (library) {
-            const data = library[section];
-            const entry = data[id];
-            if (entry) {
-                (entry as any)[data.map.rating] = rating;
-            }
+        const data = library[section];
+        const entry = data[id];
+        if (entry) {
+            (entry as any)[data.map.rating] = rating;
         }
     }
 }

@@ -12,7 +12,7 @@ import PersonalMediaServerSettings from 'types/PersonalMediaServerSettings';
 import PlayableItem from 'types/PlayableItem';
 import PlaybackType from 'types/PlaybackType';
 import type SubsonicSettings from './SubsonicSettings';
-import {chunk, Logger, shuffle} from 'utils';
+import {Logger, chunk, shuffle} from 'utils';
 import {createMediaItemFromUrl} from 'services/metadata';
 
 const logger = new Logger('SubsonicApi');
@@ -95,6 +95,15 @@ export default class SubsonicApi {
             await this.get(`updatePlaylist?${params}`);
         }
         return playlist;
+    }
+
+    async removeFromPlaylist(playlistId: string, indexes: readonly number[]): Promise<void> {
+        const chunks = chunk(indexes.toSorted((a, b) => a - b), 300).reverse();
+        for (const chunk of chunks) {
+            const params = new URLSearchParams({playlistId});
+            chunk.forEach((index) => params.append('songIndexToRemove', String(index)));
+            await this.get(`updatePlaylist?${params}`);
+        }
     }
 
     async createShare(id: string): Promise<string> {

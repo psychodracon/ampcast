@@ -1,10 +1,11 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import Theme from 'types/Theme';
+import theme from 'services/theme';
 import themeStore from 'services/theme/themeStore';
-import {prompt} from 'components/Dialog';
+import Button from 'components/Button';
+import {DialogButtons, prompt} from 'components/Dialog';
 import ListBox from 'components/ListView/ListBox';
 import {ListViewHandle} from 'components/ListView';
-import DialogButtons from 'components/Dialog/DialogButtons';
 import {saveTextToFile} from 'utils';
 import useUserThemes from './useUserThemes';
 import confirmDeleteTheme from './confirmDeleteTheme';
@@ -57,7 +58,10 @@ export default function UserThemes() {
             const name = selectedTheme.name;
             const userTheme = themeStore.getUserTheme(name);
             if (userTheme) {
-                saveTextToFile(`${name}.json`, JSON.stringify(userTheme, undefined, 4));
+                saveTextToFile(
+                    `${name}.json`,
+                    JSON.stringify(theme.toJSON(userTheme), undefined, 4)
+                );
             }
         }
     }, [selectedTheme]);
@@ -98,27 +102,27 @@ export default function UserThemes() {
                 ref={listViewRef}
             />
             <p className="user-themes-buttons">
-                <button type="button" onClick={handleRenameClick} disabled={!selectedTheme}>
+                <Button type="button" onClick={handleRenameClick} disabled={!selectedTheme}>
                     Rename…
-                </button>
-                <button type="button" onClick={handleExportClick} disabled={!selectedTheme}>
+                </Button>
+                <Button type="button" onClick={handleExportClick} disabled={!selectedTheme}>
                     Export…
-                </button>
-                <button
+                </Button>
+                <Button
                     className="user-themes-delete"
                     type="button"
                     onClick={handleDeleteClick}
                     disabled={!selectedTheme}
                 >
                     Delete
-                </button>
+                </Button>
             </p>
             <fieldset className="user-themes-import">
                 <legend>Import theme</legend>
                 <p>
-                    <button type="button" onClick={handleImportClick}>
+                    <Button type="button" onClick={handleImportClick}>
                         Import…
-                    </button>
+                    </Button>
                 </p>
             </fieldset>
             <DialogButtons />

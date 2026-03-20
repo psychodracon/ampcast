@@ -1,19 +1,12 @@
 import React, {useCallback, useId, useRef} from 'react';
 import {Writable} from 'type-fest';
 import BackupFile from 'types/BackupFile';
-import Listen from 'types/Listen';
 import {Logger, saveTextToFile} from 'utils';
-import {audioSettings} from 'services/audio';
-import {updateListens} from 'services/localdb/listens';
 import playlists from 'services/localdb/playlists';
-import pinStore from 'services/pins/pinStore';
-import preferences from 'services/preferences';
-import themeStore from 'services/theme/themeStore';
-import visualizerSettings from 'services/visualizer/visualizerSettings';
-import visualizerStore from 'services/visualizer/visualizerStore';
-import {alert, error} from 'components/Dialog';
-import DialogButtons from 'components/Dialog/DialogButtons';
-import useBackupEntries from './useBackupEntries';
+import Button from 'components/Button';
+import {DialogButtons, error} from 'components/Dialog';
+import useExportedSettings from './useExportedSettings';
+import {showImportSettingsDialog} from './ImportSettingsDialog';
 import './Backup.scss';
 
 const logger = new Logger('Backup');
@@ -21,7 +14,7 @@ const logger = new Logger('Backup');
 export default function Backup() {
     const id = useId();
     const ref = useRef<HTMLFormElement>(null);
-    const backupEntries = useBackupEntries();
+    const backupEntries = useExportedSettings();
 
     const handleExportClick = useCallback(async () => {
         type Backup = BackupFile['backup'];
@@ -53,59 +46,10 @@ export default function Backup() {
                         await error('Not a valid backup file.');
                         return;
                     }
-                    if (backup.preferences) {
-                        Object.assign(preferences, backup.preferences.app);
-                        Object.assign(audioSettings, backup.preferences.audio);
-                    }
-                    if (backup.services?.localStorage) {
-                        Object.assign(localStorage, backup.services.localStorage);
-                    }
-                    if (backup.layout?.localStorage) {
-                        Object.assign(localStorage, backup.layout.localStorage);
-                    }
-                    if (backup.pins?.length) {
-                        await pinStore.addPins(backup.pins);
-                    }
-                    if (backup.theme) {
-                        localStorage.setItem('ampcast/theme/current', backup.theme);
-                    }
-                    if (backup.userThemes?.length) {
-                        await themeStore.addUserThemes(backup.userThemes);
-                    }
-                    if (backup.visualizerFavorites?.length) {
-                        await visualizerStore.addFavorites(backup.visualizerFavorites);
-                    }
-                    if (backup.visualizerSettings) {
-                        Object.assign(visualizerSettings, backup.visualizerSettings);
-                    }
-                    if (backup.listens?.length) {
-                        await updateListens(
-                            backup.listens.map((item: Writable<Listen>) => {
-                                // These fields may be in old backup data.
-                                delete item.unplayable;
-                                delete item.blobUrl;
-                                return item;
-                            })
-                        );
-                    }
-                    if (backup.playlists?.length) {
-                        await playlists.importPlaylists(backup.playlists);
-                    }
-                    await alert({
-                        icon: 'settings',
-                        title: 'Import',
-                        message: (
-                            <>
-                                <p>Settings imported.</p>
-                                <p>The application will now reload.</p>
-                            </>
-                        ),
-                        system: true,
-                    });
-                    location.reload();
+                    await showImportSettingsDialog(backup);
                 } catch (err) {
                     logger.error(err);
-                    await error('Could not fully load backup file.');
+                    await error('Could not load backup file.');
                 }
             }
         });
@@ -131,17 +75,17 @@ export default function Backup() {
                     ))}
                 </ul>
                 <p>
-                    <button type="button" onClick={handleExportClick}>
+                    <Button type="button" onClick={handleExportClick}>
                         Export…
-                    </button>
+                    </Button>
                 </p>
             </fieldset>
             <fieldset>
                 <legend>Import</legend>
                 <p>
-                    <button type="button" onClick={handleImportClick}>
+                    <Button type="button" onClick={handleImportClick}>
                         Import…
-                    </button>
+                    </Button>
                 </p>
             </fieldset>
             <DialogButtons />

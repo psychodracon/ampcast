@@ -1,6 +1,6 @@
 import ItemType from 'types/ItemType';
-import PlaybackType from 'types/PlaybackType';
-import {getContentType, getHeaders} from './fetch';
+import browser from './browser';
+import {getContentType} from './fetch';
 
 const audio = document.createElement('audio');
 const video = document.createElement('video');
@@ -12,7 +12,10 @@ export const mediaTypes: Record<string, ReadonlyArray<string>> = {
 };
 
 export function canPlayNativeHls(): boolean {
-    return mediaTypes.hls.some((type) => canPlayType('audio', type));
+    // TODO: Chrome browsers now support native HLS playback.
+    // However CORS restrictions mean that playback from personal media servers is unreliable.
+    // return mediaTypes.hls.some((type) => canPlayType('audio', type));
+    return browser.name === 'safari';
 }
 
 export function canPlayType(type: 'audio' | 'video', contentType: string): boolean {
@@ -86,17 +89,14 @@ export function getMediaLabel(itemType: ItemType, serviceId?: string): string {
     }
 }
 
-export async function getPlaybackTypeFromUrl(url: string): Promise<PlaybackType> {
-    const headers = await getHeaders(url);
-    const contentType = headers.get('content-type')?.toLowerCase() || '';
-    if (mediaTypes.hls.includes(contentType)) {
-        return PlaybackType.HLS;
-    } else if (mediaTypes.m3u.includes(contentType)) {
-        // All the other options will fail anyway (for now).
-        return PlaybackType.IcecastM3u;
-    } else {
-        return PlaybackType.Direct;
-    }
+export function getMediaObjectId(object: {src: string}): string {
+    const [, , id] = object.src.split(':');
+    return id;
+}
+
+export function getServiceId(object: {src: string}): string {
+    const [id] = object.src.split(':');
+    return id;
 }
 
 export async function isHlsMedia(url: string): Promise<boolean> {

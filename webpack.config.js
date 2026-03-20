@@ -74,7 +74,6 @@ module.exports = (args) => {
                 'react',
                 'react-dom',
                 'react-error-boundary',
-                'spotify-web-api-js',
                 'string-score',
                 'youtube-player',
                 // These are always included in `bundle.js`. Tree-shaking?
@@ -113,7 +112,7 @@ module.exports = (args) => {
                     // Prevent imported libraries from splitting.
                     'lib/music-metadata': {
                         name: 'lib/music-metadata',
-                        test: /[\\/]node_modules[\\/](music\-metadata)[\\/]/,
+                        test: /[\\/]node_modules[\\/](music\-metadata|(win\-guid))[\\/]/,
                         chunks: 'all',
                         enforce: true,
                     },

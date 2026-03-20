@@ -23,6 +23,7 @@ import SortParams from 'types/SortParams';
 import {Logger, clamp, exists, uniq} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
 import {observeMetadataChanges} from 'services/metadata';
+import {getServiceFromSrc} from 'services/mediaServices';
 import {observeSourceSorting} from 'services/mediaServices/servicesSettings';
 
 export interface PageFetch {
@@ -83,12 +84,17 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
         return !!this.config.passive;
     }
 
-    observeAdditions(): Observable<readonly T[]> {
-        return this.passive ? EMPTY : this.additions$;
-    }
-
     observeBusy(): Observable<boolean> {
         return this.busy$.pipe(distinctUntilChanged());
+    }
+
+    observeComplete(): Observable<void> {
+        return combineLatest([this.observeItems(), this.observeSize()]).pipe(
+            // Accommodate sparse arrays.
+            filter(([items, size]) => items.reduce((total) => (total += 1), 0) === size),
+            map(() => undefined),
+            take(1)
+        );
     }
 
     observeError(): Observable<unknown> {
@@ -204,8 +210,8 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
 
     protected set items(items: readonly T[]) {
         const additions: T[] = [];
+        const keys = this.keys;
         if (!this.passive) {
-            const keys = this.keys;
             items = items.map((item) => {
                 const key = item[this.itemKey];
                 if (!keys.has(key)) {
@@ -220,6 +226,7 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
                 return item;
             });
         }
+        this.#keys = new Set(items.map((item) => item[this.itemKey]));
         if (this.#items$) {
             this.#items$.next(items);
         } else {
@@ -228,6 +235,13 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
         if (additions.length > 0) {
             this.additions$.next(additions);
         }
+    }
+
+    protected get keys(): Set<string> {
+        if (!this.#keys) {
+            this.#keys = new Set();
+        }
+        return this.#keys;
     }
 
     protected get size(): number | undefined {
@@ -248,12 +262,8 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
         return this.active$.pipe(distinctUntilChanged());
     }
 
-    protected observeComplete(): Observable<readonly T[]> {
-        return combineLatest([this.observeItems(), this.observeSize()]).pipe(
-            filter(([items, size]) => items.reduce((total) => (total += 1), 0) === size),
-            map(([items]) => items),
-            take(1)
-        );
+    protected observeAdditions(): Observable<readonly T[]> {
+        return this.passive ? EMPTY : this.additions$;
     }
 
     protected observeFetches(): Observable<PageFetch> {
@@ -279,6 +289,11 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
 
                 this.subscribeTo(
                     this.observeAdditions().pipe(tap((items) => this.addTrackCount(items))),
+                    logger
+                );
+
+                this.subscribeTo(
+                    this.observeAdditions().pipe(tap((items) => this.addUserData(items))),
                     logger
                 );
 
@@ -355,13 +370,6 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
         return this.#items$;
     }
 
-    private get keys(): Set<string> {
-        if (!this.#keys) {
-            this.#keys = new Set();
-        }
-        return this.#keys;
-    }
-
     private get size$(): BehaviorSubject<number> {
         if (!this.#size$) {
             this.#size$ = new BehaviorSubject(-1);
@@ -436,6 +444,11 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
                 );
             }
         });
+    }
+
+    private addUserData(items: readonly T[]): void {
+        const service = getServiceFromSrc(items[0]);
+        service?.addUserData?.(items);
     }
 
     private updateChildSort(createChildPager: CreateChildPager<T>, childSort?: SortParams): void {

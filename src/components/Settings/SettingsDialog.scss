@@ -17,6 +17,7 @@
         flex: initial;
         width: 11em;
         min-width: 11em;
+        border-radius: calc(var(--roundness) * 1em);
 
         .icon-settings {
             fill: var(--grey2-color);
@@ -32,11 +33,6 @@
     .media-services {
         .media-service-list {
             font-size: 1.25em;
-        }
-
-        & + .restricted-access {
-            margin-top: 1em;
-            font-style: italic;
         }
     }
 

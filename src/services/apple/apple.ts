@@ -11,12 +11,11 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import MediaSource from 'types/MediaSource';
 import Pager from 'types/Pager';
-import ParentOf from 'types/ParentOf';
 import Pin, {Pinnable} from 'types/Pin';
 import PlaybackType from 'types/PlaybackType';
 import PublicMediaService from 'types/PublicMediaService';
 import ServiceType from 'types/ServiceType';
-import {chunk} from 'utils';
+import {chunk, groupBy} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
 import {dispatchMetadataChanges} from 'services/metadata';
 import fetchAllTracks from 'services/pagers/fetchAllTracks';
@@ -67,6 +66,7 @@ const apple: PublicMediaService = {
     },
     editablePlaylists: appleEditablePlaylists,
     addMetadata,
+    addUserData,
     addToPlaylist,
     canPin,
     canStore,
@@ -117,13 +117,16 @@ async function addToPlaylist<T extends MediaItem>(
     playlist: MediaPlaylist,
     items: readonly T[]
 ): Promise<void> {
+    if (items.length === 0) {
+        return;
+    }
     const musicKit = MusicKit.getInstance();
     const [, , id] = playlist.src.split(':');
     const tracks = items.map((item) => {
         const [, type, id] = item.src.split(':');
         return {id, type};
     });
-    return musicKit.api.music(`/v1/me/library/playlists/${id}/tracks`, undefined, {
+    await musicKit.api.music(`/v1/me/library/playlists/${id}/tracks`, undefined, {
         fetchOptions: {
             method: 'POST',
             body: JSON.stringify({data: tracks}),
@@ -206,7 +209,7 @@ function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
                 isLibraryItem
                     ? {
                           'include[library-playlists]': 'catalog',
-                          'fields[library-playlists]': 'name,playParams,artwork',
+                          'fields[library-playlists]': 'name,playParams,artwork,canEdit',
                       }
                     : {
                           'omit[resource:playlists]': 'relationships',
@@ -291,7 +294,7 @@ async function getTracksById(trackIds: readonly string[]): Promise<readonly Medi
 }
 
 async function getTracksByAlbumId(id: string): Promise<readonly MediaItem[]> {
-    const album = await getMediaObject<MediaAlbum>(`${serviceId}:albums:${id}`, true);
+    const album = await getMediaObject<MediaAlbum>(`${serviceId}:albums:${id}`);
     const tracks = await fetchAllTracks(album);
     album.pager.disconnect();
     return tracks;
@@ -340,7 +343,7 @@ async function getGenres(filterType: FilterType): Promise<readonly MediaFilter[]
     return genres || [];
 }
 
-async function getMediaObject<T extends MediaObject>(src: string, keepAlive?: boolean): Promise<T> {
+async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
     src = getSrcFromUrl(src);
     const [, type, id] = src.split(':');
     const isLibraryItem = type.startsWith('library-');
@@ -352,7 +355,7 @@ async function getMediaObject<T extends MediaObject>(src: string, keepAlive?: bo
             : {[`omit[resource:${type.replace('library-', '')}]`]: 'relationships'},
         {passive: true, pageSize: 0}
     );
-    return fetchFirstItem<T>(pager, {timeout: 2000, keepAlive});
+    return fetchFirstItem<T>(pager, {timeout: 2000});
 }
 
 async function getPlaybackType(): Promise<PlaybackType> {
@@ -425,30 +428,29 @@ async function store(item: MediaObject, inLibrary: boolean): Promise<void> {
     }
 }
 
-export async function addUserData<T extends MediaObject>(
-    items: readonly T[],
-    parent?: ParentOf<T>
-): Promise<void> {
-    const isAlbumTrack = parent?.itemType === ItemType.Album;
+async function addUserData<T extends MediaObject>(items: readonly T[]): Promise<void> {
     items = items.filter(
-        (item) =>
-            item.inLibrary === undefined &&
-            !(isAlbumTrack && item.src.startsWith(`${serviceId}:library-`)) &&
-            !!item.apple?.catalogId
+        (item) => item.inLibrary === undefined && canStore(item) && !!item.apple?.catalogId
     );
-    const [item] = items;
-    if (!item || !canStore?.(item)) {
-        return;
+    if (items.length > 0) {
+        const getType = (item: MediaObject): string => {
+            const [, type] = item.src.split(':');
+            return type;
+        };
+        const groupedByType = groupBy(items, getType);
+        await Promise.all(
+            Object.keys(groupedByType).map(async (type) => {
+                const ids: string[] = groupedByType[type].map((item) => item.apple!.catalogId);
+                const inLibrary = await getInLibrary(type, ids);
+                dispatchMetadataChanges(
+                    ids.map((id, index) => ({
+                        match: (object: MediaObject) => object.apple?.catalogId === id,
+                        values: {inLibrary: inLibrary[index]},
+                    }))
+                );
+            })
+        );
     }
-    const [, type] = item.src.split(':');
-    const ids: string[] = items.map((item) => item.apple!.catalogId);
-    const inLibrary = await getInLibrary(type, ids);
-    dispatchMetadataChanges<MediaObject>(
-        ids.map((id, index) => ({
-            match: (object: MediaObject) => object.apple?.catalogId === id,
-            values: {inLibrary: inLibrary[index]},
-        }))
-    );
 }
 
 async function getInLibrary(

@@ -16,18 +16,19 @@ import ParentOf from 'types/ParentOf';
 import PlaybackType from 'types/PlaybackType';
 import SortParams from 'types/SortParams';
 import Thumbnail from 'types/Thumbnail';
-import {Logger, uniq} from 'utils';
+import {Logger, getMediaObjectId, uniq} from 'utils';
 import {MAX_DURATION} from 'services/constants';
 import SimplePager from 'services/pagers/SimplePager';
 import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
 import WrappedPager from 'services/pagers/WrappedPager';
 import fetchFirstPage from 'services/pagers/fetchFirstPage';
 import pinStore from 'services/pins/pinStore';
+import stationStore from 'services/internetRadio/stationStore';
 import plexApi, {PlexRequest, getMusicLibraryId, getMusicLibraryPath} from './plexApi';
 import plexItemType from './plexItemType';
 import plexMediaType from './plexMediaType';
 import plexSettings from './plexSettings';
-import PlexPager from './PlexPager';
+import PlexPager, {PlexPlaylistItemsPager} from './PlexPager';
 
 const logger = new Logger('plexUtils');
 
@@ -60,7 +61,7 @@ export function createMediaObject<T extends MediaObject>(
 
         case plexItemType.Playlist:
             if (isRadio(object)) {
-                return createRadioItem(object) as T;
+                return createRadioStation(object) as T;
             } else {
                 return createMediaPlaylist(object, noPager) as T;
             }
@@ -108,8 +109,8 @@ export function createMediaItemFromTrack(
         artists: track.originalTitle
             ? [track.originalTitle]
             : album?.artist
-            ? [album.artist]
-            : undefined,
+              ? [album.artist]
+              : undefined,
         albumArtist: album?.artist,
         album: album?.title,
         duration: track.duration / 1000,
@@ -145,12 +146,12 @@ function createMediaAlbum(album: plex.Album, noPager?: boolean): MediaAlbum {
             format?.tag === 'EP'
                 ? AlbumType.EP
                 : format?.tag === 'Single'
-                ? AlbumType.Single
-                : subformat?.tag === 'Soundtrack'
-                ? AlbumType.Soundtrack
-                : subformat?.tag === 'Compilation'
-                ? AlbumType.Compilation
-                : undefined,
+                  ? AlbumType.Single
+                  : subformat?.tag === 'Soundtrack'
+                    ? AlbumType.Soundtrack
+                    : subformat?.tag === 'Compilation'
+                      ? AlbumType.Compilation
+                      : undefined,
         externalUrl: getExternalUrl(album),
         title: album.title || '',
         description: album.summary,
@@ -233,7 +234,7 @@ function createMediaItemFromVideo(video: plex.MusicVideo): MediaItem {
 
 function createMediaPlaylist(playlist: plex.Playlist, noPager?: boolean): MediaPlaylist {
     const src = getSrc('playlist', playlist);
-    const mediaPlaylist = {
+    const mediaPlaylist: Writable<SetOptional<MediaPlaylist, 'pager'>> = {
         src,
         itemType: ItemType.Playlist,
         externalUrl: getExternalUrl(playlist),
@@ -248,19 +249,26 @@ function createMediaPlaylist(playlist: plex.Playlist, noPager?: boolean): MediaP
         thumbnails: createThumbnails(playlist.thumb || playlist.composite),
         isPinned: pinStore.isPinned(src),
         editable: true,
+        items: playlist.smart
+            ? undefined
+            : {
+                  deletable: true,
+                  droppable: true,
+                  moveable: true,
+              },
     };
     if (!noPager) {
-        (mediaPlaylist as any).pager = createPager(
-            {path: playlist.key},
-            {autofill: true, pageSize: 1000}
-        );
+        (mediaPlaylist as any).pager = new PlexPlaylistItemsPager(mediaPlaylist as MediaPlaylist, {
+            path: playlist.key,
+        });
     }
     return mediaPlaylist as MediaPlaylist;
 }
 
-function createRadioItem(radio: plex.Radio): MediaItem {
+function createRadioStation(radio: plex.Radio): MediaItem {
+    const src = `plex:radio:${radio.key}`;
     return {
-        src: `plex:radio:${radio.key}`,
+        src,
         title: radio.title,
         itemType: ItemType.Media,
         mediaType: MediaType.Audio,
@@ -270,6 +278,7 @@ function createRadioItem(radio: plex.Radio): MediaItem {
         duration: MAX_DURATION,
         playedAt: 0,
         skippable: true,
+        isFavoriteStation: stationStore.isFavorite({src}),
     };
 }
 
@@ -297,10 +306,13 @@ export async function getMetadata<T extends plex.MediaObject>(
     );
     if (ratingObjects.length > 0) {
         // Map of `object.key` to `object`.
-        const objectMap: Record<string, T> = objects.reduce((map, object) => {
-            map[object.key] = object;
-            return map;
-        }, {} as Record<string, T>);
+        const objectMap: Record<string, T> = objects.reduce(
+            (map, object) => {
+                map[object.key] = object;
+                return map;
+            },
+            {} as Record<string, T>
+        );
         const enhancedObjects = await plexApi.getMetadata(
             ratingObjects.map((object) => object.ratingKey)
         );
@@ -432,16 +444,22 @@ export function createArtistAlbumsPager(
             new SimpleMediaPager<MediaAlbum>(async () => {
                 try {
                     const items = await fetchFirstPage(album.pager, {keepAlive: true});
-                    return items.length === 0 ? [] : [album];
+                    if (items.length === 0) {
+                        album.pager.disconnect();
+                        return [];
+                    } else {
+                        return [album];
+                    }
                 } catch (err) {
                     logger.error(err);
+                    album.pager.disconnect();
                     return [];
                 }
             });
         const albumsPager = createPager<MediaAlbum>({
             path: getMusicLibraryPath(),
             params: {
-                'artist.id': getRatingKey(artist),
+                'artist.id': getMediaObjectId(artist),
                 type: plexMediaType.Album,
                 sort: albumSort
                     ? `${albumSort.sortBy}:${albumSort.sortOrder === -1 ? 'desc' : 'asc'}`
@@ -458,7 +476,7 @@ export function createArtistAlbumsPager(
 function createArtistOtherTracks(artist: MediaArtist): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `plex:other-tracks:${getRatingKey(artist)}`,
+        src: `plex:other-tracks:${getMediaObjectId(artist)}`,
         title: artist.synthetic ? 'Tracks' : 'Other Tracks',
         artist: artist.title,
         thumbnails: artist.thumbnails,
@@ -471,7 +489,7 @@ function createArtistOtherTracks(artist: MediaArtist): MediaAlbum {
 function createArtistVideos(artist: MediaArtist): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `plex:videos:${getRatingKey(artist)}`,
+        src: `plex:videos:${getMediaObjectId(artist)}`,
         title: 'Music Videos',
         artist: artist.title,
         thumbnails: artist.thumbnails,
@@ -491,7 +509,7 @@ function createOtherTracksPager(artist: MediaArtist): Pager<MediaItem> {
 }
 
 function createVideosPager(artist: MediaArtist): Pager<MediaItem> {
-    return createPager({path: `/library/metadata/${getRatingKey(artist)}/extras`});
+    return createPager({path: `/library/metadata/${getMediaObjectId(artist)}/extras`});
 }
 
 function createPager<T extends MediaObject>(
@@ -511,9 +529,4 @@ function createPager<T extends MediaObject>(
 
 function isRadio(playlist: plex.Playlist | plex.Radio): playlist is plex.Radio {
     return 'radio' in playlist && playlist.radio === '1';
-}
-
-export function getRatingKey({src}: {src: string}): string {
-    const [, , ratingKey] = src.split(':');
-    return ratingKey;
 }

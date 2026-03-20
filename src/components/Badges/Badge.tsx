@@ -1,12 +1,13 @@
 import React from 'react';
 import AlbumType from 'types/AlbumType';
 import ItemType from 'types/ItemType';
+import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
 import MediaArtist from 'types/MediaArtist';
 import MediaItem from 'types/MediaItem';
 import MediaType from 'types/MediaType';
 import {copyToClipboard} from 'utils';
-import CopyButton from 'components/Button/CopyButton';
+import {CopyButton} from 'components/Button';
 import Icon from 'components/Icon';
 import './Badge.scss';
 
@@ -125,6 +126,13 @@ export interface ExternalLinkBadgeProps {
 
 export function LastFmBadge({item}: ExternalLinkBadgeProps) {
     if (/^(lastfm|listenbrainz|mixcloud|musicbrainz):/.test(item.src) || item.synthetic) {
+        return;
+    }
+    if (
+        item.itemType === ItemType.Media &&
+        item.linearType &&
+        item.linearType !== LinearType.MusicTrack
+    ) {
         return;
     }
     const title = encodeURIComponent(item.title);

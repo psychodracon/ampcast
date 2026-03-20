@@ -142,6 +142,7 @@ function Scrollbar({
     const handleDecrementMouseDown = useCallback(
         (event: React.MouseEvent) => {
             if (event.button === 0) {
+                event.stopPropagation();
                 startScroll(event.target as HTMLElement, -scrollAmount);
             }
         },
@@ -151,6 +152,7 @@ function Scrollbar({
     const handleIncrementMouseDown = useCallback(
         (event: React.MouseEvent) => {
             if (event.button === 0) {
+                event.stopPropagation();
                 startScroll(event.target as HTMLElement, scrollAmount);
             }
         },
@@ -172,8 +174,8 @@ function Scrollbar({
 
     const handleThumbMouseDown = useCallback(
         (event: React.MouseEvent) => {
-            event.stopPropagation();
             if (event.button === 0) {
+                event.stopPropagation();
                 setDragStart(vertical ? event.screenY : event.screenX);
                 setDragThumbPosition(thumbPosition);
             }
@@ -228,8 +230,8 @@ function Scrollbar({
                 className="scrollbar-button scrollbar-button-decrement"
                 onMouseDown={handleDecrementMouseDown}
             >
-                <svg className="icon" viewBox="0 0 50 50">
-                    <polygon points={vertical ? '0,50 25,0 50,50' : '50,0 0,25 50,50'} />
+                <svg className="icon" viewBox="0 0 150 150">
+                    <polygon points={vertical ? '50,100 75,50 100,100' : '100,50 50,75 100,100'} />
                 </svg>
             </div>
             <div className="scrollbar-track" onMouseDown={handleTrackMouseDown} ref={trackRef}>
@@ -249,8 +251,8 @@ function Scrollbar({
                 className="scrollbar-button scrollbar-button-increment"
                 onMouseDown={handleIncrementMouseDown}
             >
-                <svg className="icon" viewBox="0 0 50 50">
-                    <polygon points={vertical ? '0,0 25,50 50,0' : '0,0 50,25 0,50'} />
+                <svg className="icon" viewBox="0 0 150 150">
+                    <polygon points={vertical ? '50,50 75,100 100,50' : '50,50 100,75 50,100'} />
                 </svg>
             </div>
         </div>

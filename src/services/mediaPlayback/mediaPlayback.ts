@@ -9,10 +9,12 @@ import {
     delayWhen,
     distinctUntilChanged,
     filter,
+    firstValueFrom,
     fromEvent,
     map,
     mergeMap,
     of,
+    race,
     skipWhile,
     switchMap,
     take,
@@ -25,18 +27,18 @@ import MediaPlayback from 'types/MediaPlayback';
 import Player from 'types/Player';
 import PlaybackType from 'types/PlaybackType';
 import PlaylistItem from 'types/PlaylistItem';
-import {formatTime, getPlaybackTypeFromUrl, isMiniPlayer, Logger} from 'utils';
+import {formatTime, isMiniPlayer, Logger} from 'utils';
 import {MAX_DURATION} from 'services/constants';
-import {dispatchMetadataChanges} from 'services/metadata';
+import {createMediaItemFromUrl, dispatchMetadataChanges} from 'services/metadata';
 import lookup from 'services/lookup';
 import {hasPlayableSrc, getServiceFromSrc} from 'services/mediaServices';
 import playlist from 'services/playlist';
 import {lockVisualizer, setCurrentVisualizer} from 'services/visualizer';
-import mediaPlaybackSettings from './mediaPlaybackSettings';
 import mediaPlayer from './mediaPlayer';
 import miniPlayer from './miniPlayer';
 import miniPlayerRemote from './miniPlayerRemote';
 import playback, {observePaused} from './playback';
+import playbackSettings, {observePlaybackSettings} from './playbackSettings';
 import visualizerPlayer from './visualizerPlayer';
 import './scrobbler';
 
@@ -45,7 +47,6 @@ const loadingLocked$ = new BehaviorSubject(!isMiniPlayer);
 const killed$ = new Subject<void>();
 
 let _autoplay = false;
-let _loop = mediaPlaybackSettings.loop;
 let currentNavigation: 'prev' | 'next' = 'next';
 
 export function observeCurrentTime(): Observable<number> {
@@ -211,6 +212,28 @@ export function next(): void {
     }
 }
 
+async function skipPrev(): Promise<void> {
+    if (miniPlayer.active) {
+        miniPlayer.skipPrev();
+        await waitForNextTrack();
+    } else {
+        await mediaPlayer.skipPrev();
+    }
+}
+
+async function skipNext(): Promise<void> {
+    if (miniPlayer.active) {
+        miniPlayer.skipNext();
+        await waitForNextTrack();
+    } else {
+        await mediaPlayer.skipNext();
+    }
+}
+
+async function waitForNextTrack(timeout = 3_000): Promise<void> {
+    await firstValueFrom(race(playback.observePlaybackStart(), timer(timeout)));
+}
+
 function observePlaylistAtEnd(): Observable<boolean> {
     return combineLatest([playlist.observeCurrentIndex(), playlist.observeSize()]).pipe(
         map(([index, size]) => index === size - 1),
@@ -297,9 +320,8 @@ async function getPlaybackType(item: PlaylistItem): Promise<PlaybackType> {
             if (service?.getPlaybackType) {
                 playbackType = await service.getPlaybackType(item);
             } else if (/^https?:/.test(item.src)) {
-                playbackType = await getPlaybackTypeFromUrl(item.src);
-            } else {
-                playbackType = PlaybackType.Direct;
+                const lookup = await createMediaItemFromUrl(item.src);
+                playbackType = lookup.playbackType;
             }
             dispatchMetadataChanges({
                 match: (object) => object.src === item.src,
@@ -308,9 +330,8 @@ async function getPlaybackType(item: PlaylistItem): Promise<PlaybackType> {
         }
     } catch (err) {
         logger.error(err);
-        playbackType = PlaybackType.Direct;
     }
-    return playbackType;
+    return playbackType ?? PlaybackType.Direct;
 }
 
 const mediaPlayback: MediaPlayback = {
@@ -328,27 +349,22 @@ const mediaPlayback: MediaPlayback = {
         return false;
     },
     get loop(): boolean {
-        return _loop;
+        return playbackSettings.loop;
     },
     set loop(loop: boolean) {
-        _loop = loop;
-        mediaPlaybackSettings.loop = loop;
+        playbackSettings.loop = loop;
     },
     get muted(): boolean {
-        return mediaPlayer.muted;
+        return playbackSettings.muted;
     },
     set muted(muted: boolean) {
-        mediaPlayer.muted = muted;
-        miniPlayer.muted = muted;
-        mediaPlaybackSettings.muted = muted;
+        playbackSettings.muted = muted;
     },
     get volume(): number {
-        return mediaPlayer.volume;
+        return playbackSettings.volume;
     },
     set volume(volume: number) {
-        mediaPlayer.volume = volume;
-        miniPlayer.volume = volume;
-        mediaPlaybackSettings.volume = volume;
+        playbackSettings.volume = volume;
     },
     observeCurrentTime,
     observeDuration,
@@ -366,12 +382,20 @@ const mediaPlayback: MediaPlayback = {
     resize,
     next,
     prev,
+    skipNext,
+    skipPrev,
 };
 
 export default mediaPlayback;
 
-mediaPlayback.muted = mediaPlaybackSettings.muted;
-mediaPlayback.volume = mediaPlaybackSettings.volume;
+observePlaybackSettings()
+    .pipe(
+        tap(({volume, muted}) => {
+            mediaPlayer.volume = volume;
+            mediaPlayer.muted = muted;
+        })
+    )
+    .subscribe(logger);
 
 if (isMiniPlayer) {
     miniPlayerRemote.connect(mediaPlayback, lockLoading, unlockLoading);
@@ -398,7 +422,7 @@ if (!isMiniPlayer) {
         .pipe(takeUntil(killed$))
         .subscribe(() => {
             if (playlist.atEnd) {
-                if (_loop && !mediaPlayback.stopAfterCurrent) {
+                if (playbackSettings.loop && !mediaPlayback.stopAfterCurrent) {
                     if (playlist.atStart) {
                         play();
                     } else {
@@ -485,8 +509,9 @@ playlist
                 ? playback.observePlaybackState().pipe(
                       filter(({currentItem}) => currentItem?.id === item.id),
                       map(({duration}) => duration),
+                      distinctUntilChanged(),
                       filter((duration) => !!duration && duration !== item.duration),
-                      take(1),
+                      take(2),
                       tap((duration) =>
                           dispatchMetadataChanges({
                               match: (object) => object.src === item.src,

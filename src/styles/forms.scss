@@ -96,8 +96,14 @@ input[type="color"] {
 }
 
 input[type="range"] {
+    --track-color: currentColor;
+    --track-radius: var(--track-height);
     --track-height: 0.25em;
-    --thumb-size: 1.5em;
+    --thumb-color: currentColor;
+    --thumb-width: 1.5em;
+    --thumb-height: 1.5em;
+    --thumb-radius: var(--thumb-height);
+    --thumb-shadow: 0 0 1px calc(var(--thumb-height) / 10) var(--background-color);
 
     border: none;
     -webkit-appearance: none;
@@ -111,22 +117,22 @@ input[type="range"] {
     @mixin track {
         width: 100%;
         height: var(--track-height);
-        background-color: currentColor;
+        background-color: var(--track-color);
         border: none;
-        border-radius: var(--track-height);
+        border-radius: var(--track-radius);
         box-sizing: border-box;
     }
 
     @mixin thumb {
         appearance: none;
-        width: var(--thumb-size);
-        height: var(--thumb-size);
-        background-color: currentColor;
+        width: var(--thumb-width);
+        height: var(--thumb-height);
+        background-color: var(--thumb-color);
         border: 0;
-        border-radius: var(--thumb-size);
-        margin-top: calc(var(--track-height) / 2 - var(--thumb-size) / 2);
+        border-radius: var(--thumb-radius);
+        margin-top: calc(var(--track-height) / 2 - var(--thumb-height) / 2);
         box-sizing: border-box;
-        box-shadow: 0 0 1px calc(var(--thumb-size) / 10) var(--background-color);
+        box-shadow: var(--thumb-shadow);
     }
 
     &::-webkit-slider-runnable-track {
@@ -171,7 +177,9 @@ input + label {
 }
 
 input:disabled + label,
-label:has(+ input:disabled) {
+select:disabled + label,
+label:has(+ input:disabled),
+label:has(+ select:disabled) {
     color: var(--grey1-color);
 }
 
@@ -187,39 +195,11 @@ textarea {
     }
 }
 
-button,
-[role="button"] {
-    @include effects.button;
-    -webkit-appearance: none;
-    appearance: none;
-    padding: 0.125em 1em;
-    text-align: center;
-    white-space: nowrap;
-    user-select: none;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    @include effects.pressable;
-
-    &:disabled {
-        filter: grayscale(1);
-        background-image: none;
-        opacity: 0.5;
-        cursor: default;
-        pointer-events: none;
-    }
-
-    .focus-visible &:focus {
-        @include effects.outline;
-    }
-
-    & + & {
-        margin-left: 0.75em;
-    }
-
-    &.small {
-        padding: calc(0.25em - 1px) 0.875em;
-        font-size: 0.75em;
-    }
+button:disabled {
+    filter: grayscale(1);
+    opacity: 0.5;
+    cursor: default;
+    pointer-events: none;
 }
 
 .buttons {

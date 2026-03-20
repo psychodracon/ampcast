@@ -1,18 +1,19 @@
 import React from 'react';
 import Action from 'types/Action';
 import ItemType from 'types/ItemType';
+import LinearType from 'types/LinearType';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import {browser} from 'utils';
-import {getServiceFromSrc} from 'services/mediaServices';
+import {getService, getServiceFromSrc} from 'services/mediaServices';
 import PopupMenu, {
     PopupMenuItem,
     PopupMenuProps,
     PopupMenuSeparator,
     showPopupMenu,
 } from 'components/PopupMenu';
-import useIsPlaylistPlayable from 'hooks/useIsPlaylistPlayable';
+import usePager from 'hooks/usePager';
 import {getLabelForAction} from './Actions';
 import {AddToPlaylistMenuItem} from './PlaylistActions';
 
@@ -45,7 +46,7 @@ export function ActionsMenuItems<T extends MediaObject>({
     const isPlaylist = item?.itemType === ItemType.Playlist;
     const playableTypes = [ItemType.Media, ItemType.Album, ItemType.Playlist];
     const allPlayable = items.every((item) => playableTypes.includes(item.itemType));
-    const playlistPlayable = useIsPlaylistPlayable(isPlaylist ? item : undefined);
+    const [{complete: playlistPlayable}] = usePager(isPlaylist ? item.pager : null);
     const playableNow = isPlaylist ? playlistPlayable : allPlayable;
     const canAddToPlaylist = item?.itemType === ItemType.Media;
 
@@ -145,6 +146,7 @@ interface ContextualActionsProps<T extends MediaObject> {
 
 function ContextualActions<T extends MediaObject>({item, inListView}: ContextualActionsProps<T>) {
     const service = getServiceFromSrc(item);
+    const internetRadio = getService('internet-radio');
 
     return (
         <>
@@ -158,6 +160,7 @@ function ContextualActions<T extends MediaObject>({item, inListView}: Contextual
                     <PopupMenuSeparator />
                 </>
             ) : null}
+
             {item.inLibrary === false && service?.canStore?.(item, inListView) ? (
                 <PopupMenuItem<Action>
                     label={getLabelForAction(service, Action.AddToLibrary)}
@@ -165,6 +168,7 @@ function ContextualActions<T extends MediaObject>({item, inListView}: Contextual
                     key={Action.AddToLibrary}
                 />
             ) : null}
+
             {/* remove doesn't work (https://developer.apple.com/forums/thread/107807) */}
             {service?.id !== 'apple' &&
             item.inLibrary === true &&
@@ -175,7 +179,21 @@ function ContextualActions<T extends MediaObject>({item, inListView}: Contextual
                     key={Action.RemoveFromLibrary}
                 />
             ) : null}
-            {inListView && item.itemType === ItemType.Playlist ? (
+
+            {item.itemType === ItemType.Media &&
+            item.linearType === LinearType.Station &&
+            item.isFavoriteStation !== undefined &&
+            internetRadio?.canStore?.(item, inListView) ? (
+                <PopupMenuItem<Action>
+                    label={
+                        item.isFavoriteStation ? 'Remove from My Stations' : 'Add to My Stations'
+                    }
+                    value={item.isFavoriteStation ? Action.RemoveStation : Action.AddStation}
+                    key={item.isFavoriteStation ? Action.RemoveStation : Action.AddStation}
+                />
+            ) : null}
+
+            {item.itemType === ItemType.Playlist ? (
                 <>
                     <PopupMenuSeparator />
                     {service?.editPlaylist ? (
@@ -186,7 +204,7 @@ function ContextualActions<T extends MediaObject>({item, inListView}: Contextual
                             key={Action.EditPlaylist}
                         />
                     ) : null}
-                    {service?.deletePlaylist ? (
+                    {inListView && service?.deletePlaylist ? (
                         <PopupMenuItem<Action>
                             label="Delete playlist"
                             acceleratorKey="Del"

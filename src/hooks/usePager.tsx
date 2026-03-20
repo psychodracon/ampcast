@@ -1,5 +1,5 @@
 import {useCallback, useLayoutEffect, useState} from 'react';
-import {debounceTime, Subscription} from 'rxjs';
+import {Subscription} from 'rxjs';
 import Pager from 'types/Pager';
 import useSubject from './useSubject';
 
@@ -11,6 +11,7 @@ export interface PagerState<T> {
     maxSize?: number | undefined;
     error: unknown;
     busy: boolean;
+    complete: boolean;
     loaded: boolean;
 }
 
@@ -20,6 +21,7 @@ const emptyState: PagerState<any> = {
     maxSize: undefined,
     error: undefined,
     busy: false,
+    complete: false,
     loaded: false,
 };
 
@@ -44,12 +46,9 @@ export default function usePager<T>(pager: Pager<T> | null) {
         if (pager) {
             const subscription = new Subscription();
             subscription.add(
-                pager
-                    .observeItems()
-                    .pipe(debounceTime(1)) // Force async.
-                    .subscribe((items) => {
-                        setState((state) => ({...state, items, loaded: true}));
-                    })
+                pager.observeItems().subscribe((items) => {
+                    setState((state) => ({...state, items, loaded: true}));
+                })
             );
             subscription.add(
                 pager.observeSize().subscribe((size) => {
@@ -64,6 +63,11 @@ export default function usePager<T>(pager: Pager<T> | null) {
             subscription.add(
                 pager.observeBusy().subscribe((busy) => {
                     setState((state) => ({...state, busy}));
+                })
+            );
+            subscription.add(
+                pager.observeComplete?.().subscribe(() => {
+                    setState((state) => ({...state, complete: true}));
                 })
             );
             subscription.add(

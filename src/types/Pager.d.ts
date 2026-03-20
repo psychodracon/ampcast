@@ -6,16 +6,18 @@ export default interface Pager<T> {
     readonly pageSize: number;
     readonly maxSize?: number | undefined;
     observeBusy: () => Observable<boolean>;
+    observeComplete: () => Observable<void>;
     observeItems(): Observable<readonly T[]>;
     observeSize(): Observable<number>;
     observeError(): Observable<unknown>;
     fetchAt(index: number, length?: number): void;
     disconnect(): void;
+    activate?(): void; // Mark the pager as `active` (currently providing data to a component in view)
+    deactivate?(): void;
+    // These optional methods are for dynamic lists (e.g. playlists)
     addItems?(items: readonly T[], atIndex?: number): void;
     moveItems?(items: readonly T[], toIndex: number): void;
     removeItems?(items: readonly T[]): void;
-    activate?(): void;
-    deactivate?(): void;
 }
 
 // TODO: This is really `MediaPagerConfig`.

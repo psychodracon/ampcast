@@ -2,7 +2,7 @@
 
 .scrollbar {
     position: absolute;
-    background: var(--scrollbar-background-color);
+    background: var(--scrollbar-track-color);
     border-radius: var(--app-border-radius);
     display: none;
 
@@ -10,44 +10,43 @@
         right: 0;
         top: 0;
         bottom: 0;
-        width: var(--scrollbar-size);
+        width: var(--scrollbar-width);
     }
 
     &-horizontal {
         left: 0;
         bottom: 0;
         right: 0;
-        height: var(--scrollbar-size);
+        height: var(--scrollbar-width);
     }
 
     &-thumb,
     &-button {
-        color: var(--scrollbar-text-color);
-        background-clip: padding-box;
-        background-color: var(--scrollbar-color);
-        background-image:
-            linear-gradient(to bottom,
-                var(--scrollbar-color-hi),
-                transparent 0.125em),
-            linear-gradient(to right,
-                var(--scrollbar-color-hi),
-                transparent 0.125em),
-            linear-gradient(to left,
-                var(--scrollbar-color-lo),
-                transparent 0.125em),
-            linear-gradient(to top,
-                var(--scrollbar-color-lo),
-                transparent 0.125em);
-        border: 1px solid var(--black);
-        border-radius: calc(var(--roundness) * 1em);
-        position: absolute;
-        width: var(--scrollbar-size);
-        height: var(--scrollbar-size);
-        border-radius: var(--app-border-radius);
+        @include effects.surface;
         @include effects.pressable;
+        --amb-light-hue: var(--scrollbar-color-h);
+        --amb-light-saturation: var(--scrollbar-color-s);
+        --amb-key-light-intensity: var(--scrollbar-color-l2);
+        --amb-chamfer: var(--scrollbar-chamfer);
+        --amb-fillet: var(--scrollbar-fillet);
+        --hover-light-intensity: min(calc(var(--scrollbar-color-l2) + 0.025), 1);
+        --active-light-intensity: max(calc(var(--scrollbar-color-l2) - 0.025), 0);
+        position: absolute;
+        width: var(--scrollbar-width);
+        height: var(--scrollbar-width);
+        color: var(--scrollbar-text-color);
+        border:
+            calc(var(--scrollbar-border-width, 1) * 0.0625em)
+            solid
+            var(--scrollbar-border-color, var(--black));
+        border-radius: var(--app-border-radius);
 
-        .browser-firefox &:active {
-            transform: none;
+        .scrollbar-buttons-concave & {
+            @include effects.concave;
+        }
+
+        .scrollbar-buttons-convex & {
+            @include effects.convex;
         }
     }
 
@@ -57,18 +56,25 @@
         justify-content: center;
 
         .icon {
-            width: calc(var(--scrollbar-size) / 3);
-            height: calc(var(--scrollbar-size) / 3);
-            pointer-events: none;
+            width: var(--scrollbar-width);
+            height: var(--scrollbar-width);
         }
     }
 
-    &-vertical &-button-increment {
-        bottom: 0;
+    &-horizontal &-button-decrement {
+        left: 0;
     }
 
     &-horizontal &-button-increment {
         right: 0;
+    }
+
+    &-vertical &-button-decrement {
+        top: 0;
+    }
+
+    &-vertical &-button-increment {
+        bottom: 0;
     }
 
     &-track {
@@ -78,23 +84,23 @@
     &-vertical &-track {
         left: 0;
         right: 0;
-        top: var(--scrollbar-size);
-        bottom: var(--scrollbar-size);
+        top: var(--scrollbar-width);
+        bottom: var(--scrollbar-width);
     }
 
     &-horizontal &-track {
-        left: var(--scrollbar-size);
-        right: var(--scrollbar-size);
+        left: var(--scrollbar-width);
+        right: var(--scrollbar-width);
         top: 0;
         bottom: 0;
     }
 
     &-horizontal &-thumb {
-        min-width: calc(var(--scrollbar-size) * 0.67);
+        min-width: calc(var(--scrollbar-width) * 0.67);
     }
 
     &-vertical &-thumb {
-        min-height: calc(var(--scrollbar-size) * 0.67);
+        min-height: calc(var(--scrollbar-width) * 0.67);
     }
 
     .overflow-x > &-horizontal,
@@ -103,18 +109,18 @@
     }
 
     .overflow-x.overflow-y > &-horizontal &-track {
-        right: calc(2 * var(--scrollbar-size));
+        right: calc(2 * var(--scrollbar-width));
     }
 
     .overflow-x.overflow-y > &-horizontal &-button-increment {
-        right: var(--scrollbar-size);
+        right: var(--scrollbar-width);
     }
 
     .overflow-x.overflow-y > &-vertical &-track {
-        bottom: calc(2 * var(--scrollbar-size));
+        bottom: calc(2 * var(--scrollbar-width));
     }
 
     .overflow-x.overflow-y > &-vertical &-button-increment {
-        bottom: var(--scrollbar-size);
+        bottom: var(--scrollbar-width);
     }
 }

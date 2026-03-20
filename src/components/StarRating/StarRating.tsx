@@ -4,6 +4,7 @@ import './StarRating.scss';
 
 export interface StarRatingProps {
     value?: number; // 0 - 5
+    readOnly?: boolean;
     tabIndex?: number;
     increment?: 0.5 | 1;
     onChange?: (value: number) => void;
@@ -11,12 +12,13 @@ export interface StarRatingProps {
 
 export default function StarRating({
     value = 0,
+    readOnly,
     tabIndex = 0,
     increment = 1,
     onChange,
 }: StarRatingProps) {
     const buttonsRef = useRef<HTMLDivElement>(null);
-    const [selectedIndex, setSelectedIndex] = useState(() => Math.max(Math.ceil(value) - 1, 0));
+    const [currentValue, setCurrentValue] = useState(value);
     const [hoverValue, setHoverValue] = useState(-1);
     const [ratingReset, setRatingReset] = useState(false);
 
@@ -24,18 +26,27 @@ export default function StarRating({
         (event: React.KeyboardEvent) => {
             let newValue = value;
             switch (event.key) {
-                case 'ArrowLeft': {
+                case 'ArrowLeft':
+                case 'ArrowDown':
                     newValue -= increment;
                     break;
-                }
 
-                case 'ArrowRight': {
+                case 'ArrowRight':
+                case 'ArrowUp':
                     newValue += increment;
-                }
+                    break;
+
+                case 'Home':
+                    newValue = 0;
+                    break;
+
+                case 'End':
+                    newValue = 5;
+                    break;
             }
             newValue = clamp(0, newValue, 5);
             if (newValue !== value) {
-                setSelectedIndex(Math.max(Math.ceil(newValue) - 1, 0));
+                setCurrentValue(newValue);
                 onChange?.(newValue);
             }
         },
@@ -43,42 +54,62 @@ export default function StarRating({
     );
 
     return (
-        <div className="star-rating" tabIndex={tabIndex}>
+        <div
+            className="star-rating"
+            role="slider"
+            aria-label="Rating"
+            aria-valuemin={0}
+            aria-valuemax={5}
+            aria-valuenow={currentValue}
+            onKeyDown={readOnly ? undefined : handleKeyDown}
+            tabIndex={tabIndex}
+        >
             <div
                 className="star-rating-buttons"
-                onKeyDown={handleKeyDown}
                 onMouseDown={cancelEvent}
                 onMouseUp={stopPropagation}
-                onMouseMove={(event) => {
-                    const rect = buttonsRef.current!.getBoundingClientRect();
-                    const value = Math.ceil(((event.clientX - rect.left) / rect.width) * 10) / 2;
-                    setHoverValue(clamp(0, increment === 1 ? Math.ceil(value) : value, 5));
-                }}
-                onMouseLeave={() => {
-                    setRatingReset(false);
-                    setHoverValue(-1);
-                }}
+                onMouseMove={
+                    readOnly
+                        ? undefined
+                        : (event) => {
+                              const rect = buttonsRef.current!.getBoundingClientRect();
+                              const value =
+                                  Math.ceil(((event.clientX - rect.left) / rect.width) * 10) / 2;
+                              setHoverValue(
+                                  clamp(0, increment === 1 ? Math.ceil(value) : value, 5)
+                              );
+                          }
+                }
+                onMouseLeave={
+                    readOnly
+                        ? undefined
+                        : () => {
+                              setRatingReset(false);
+                              setHoverValue(-1);
+                          }
+                }
                 ref={buttonsRef}
             >
                 {[0, 1, 2, 3, 4].map((index) => (
                     <Star
                         index={index}
                         value={ratingReset ? 0 : hoverValue === -1 ? value : hoverValue}
-                        selected={index === selectedIndex}
-                        onClick={(event) => {
-                            if (event.button === 0) {
-                                if (value === hoverValue && !ratingReset) {
-                                    setSelectedIndex(0);
-                                    setRatingReset(true);
-                                    onChange?.(0);
-                                } else {
-                                    setSelectedIndex(index);
-                                    setRatingReset(false);
-                                    onChange?.(hoverValue);
-                                }
-                            }
-                        }}
-                        onMouseLeave={() => setRatingReset(false)}
+                        onClick={
+                            readOnly
+                                ? undefined
+                                : (event) => {
+                                      if (event.button === 0) {
+                                          if (value === hoverValue && !ratingReset) {
+                                              setRatingReset(true);
+                                              onChange?.(0);
+                                          } else {
+                                              setRatingReset(false);
+                                              onChange?.(hoverValue);
+                                          }
+                                      }
+                                  }
+                        }
+                        onMouseLeave={readOnly ? undefined : () => setRatingReset(false)}
                         key={index}
                     />
                 ))}
@@ -90,18 +121,12 @@ export default function StarRating({
 interface StarProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     index: number;
     value: number;
-    selected: boolean;
 }
 
-function Star({index, value, selected, ...props}: StarProps) {
+function Star({index, value, ...props}: StarProps) {
     const max = index + 1;
     return (
-        <button
-            {...props}
-            className={`star-rating-button ${selected ? 'selected' : ''}`}
-            type="button"
-            tabIndex={-1}
-        >
+        <button {...props} className="star-rating-button" type="button" tabIndex={-1}>
             {max - value === 0.5 ? (
                 <span className="half-star">
                     <span className="half-star-bg">☆</span>

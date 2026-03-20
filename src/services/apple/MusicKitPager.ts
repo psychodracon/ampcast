@@ -1,11 +1,14 @@
-import {mergeMap} from 'rxjs';
+import {filter, map, switchMap, tap} from 'rxjs';
 import ItemType from 'types/ItemType';
+import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
+import MediaPlaylist from 'types/MediaPlaylist';
 import {Page, PagerConfig} from 'types/Pager';
 import ParentOf from 'types/ParentOf';
-import {Logger} from 'utils';
+import {Logger, uniqBy} from 'utils';
+import {dispatchMetadataChanges, observePlaylistAdditions} from 'services/metadata';
 import SequentialPager from 'services/pagers/SequentialPager';
-import {addUserData} from './apple';
+import apple from './apple';
 import {createMediaObjects, musicKitFetch, MusicKitItem} from './musicKitUtils';
 
 const logger = new Logger('MusicKitPager');
@@ -62,19 +65,78 @@ export default class MusicKitPager<T extends MediaObject> extends SequentialPage
             {pageSize: 100, ...options}
         );
     }
+}
+
+// TODO: This needs to be exported from here to avoid circular references.
+
+export class MusicKitPlaylistItemsPager extends MusicKitPager<MediaItem> {
+    constructor(
+        private readonly playlist: MediaPlaylist,
+        tracksUrl: string
+    ) {
+        super(
+            tracksUrl,
+            {'include[library-songs]': 'catalog'},
+            {
+                pageSize: 100,
+                maxSize: playlist.isChart ? 100 : undefined,
+                autofill: !playlist.isChart,
+                autofillInterval: 1000,
+                autofillMaxPages: 10,
+            },
+            playlist
+        );
+    }
+
+    // (add|move|remove)Items will only be called if the playlist is complete.
+    // Need to trust the UI on this.
+
+    addItems(additions: readonly MediaItem[]): void {
+        additions = this.filterAdditions(additions);
+        if (additions.length > 0) {
+            this._addItems(additions);
+            this.synchAdditions(additions);
+        }
+    }
 
     protected connect(): void {
         if (!this.disconnected && !this.connected) {
             super.connect();
-
-            if (!this.passive) {
-                this.subscribeTo(
-                    this.observeAdditions().pipe(
-                        mergeMap((items) => addUserData(items, this.parent))
-                    ),
-                    logger
-                );
-            }
+            this.subscribeTo(
+                this.observeComplete().pipe(
+                    switchMap(() => observePlaylistAdditions(this.playlist)),
+                    map((items) => this.filterAdditions(items)),
+                    filter((items) => items.length > 0),
+                    tap((items) => this._addItems(items))
+                ),
+                logger
+            );
         }
+    }
+
+    private _addItems(additions: readonly MediaItem[]): void {
+        const items = this.items.concat(additions);
+        this.size = items.length;
+        this.items = items;
+        dispatchMetadataChanges({
+            match: (object) => object.src === this.playlist.src,
+            values: {trackCount: this.size},
+        });
+    }
+
+    private filterAdditions(additions: readonly MediaItem[]): readonly MediaItem[] {
+        return uniqBy('src', additions).filter((item) => !this.keys.has(item.src));
+    }
+
+    private async synchAdditions(additions: readonly MediaItem[]) {
+        this.busy = true;
+        try {
+            this.error = undefined;
+            await apple.addToPlaylist!(this.playlist, additions);
+        } catch (err) {
+            logger.error(err);
+            this.error = err;
+        }
+        this.busy = false;
     }
 }
