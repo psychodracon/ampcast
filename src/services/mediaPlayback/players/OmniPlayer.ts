@@ -7,9 +7,11 @@ import {
     filter,
     merge,
     switchMap,
+    of,
 } from 'rxjs';
 import AudioManager from 'types/AudioManager';
 import Player from 'types/Player';
+import PlaylistItem from 'types/PlaylistItem';
 
 export type CanPlay<T> = (src: T) => boolean;
 
@@ -62,9 +64,11 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
     }
 
     set loop(loop: boolean) {
-        this.#loop = loop;
-        for (const player of this.players) {
-            player.loop = loop;
+        if (this.#loop !== loop) {
+            this.#loop = loop;
+            for (const player of this.players) {
+                player.loop = loop;
+            }
         }
     }
 
@@ -73,12 +77,14 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
     }
 
     set muted(muted: boolean) {
-        this.#muted = muted;
-        if (this.currentPlayer) {
-            this.currentPlayer.muted = muted;
-        }
-        if (this.audio) {
-            this.audio.volume = muted ? 0 : this.volume;
+        if (this.#muted !== muted) {
+            this.#muted = muted;
+            if (this.currentPlayer) {
+                this.currentPlayer.muted = muted;
+            }
+            if (this.audio) {
+                this.audio.volume = muted ? 0 : this.volume;
+            }
         }
     }
 
@@ -87,12 +93,14 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
     }
 
     set volume(volume: number) {
-        this.#volume = volume;
-        for (const player of this.players) {
-            player.volume = volume;
-        }
-        if (this.audio) {
-            this.audio.volume = this.muted ? 0 : volume;
+        if (this.#volume !== volume) {
+            this.#volume = volume;
+            for (const player of this.players) {
+                player.volume = volume;
+            }
+            if (this.audio) {
+                this.audio.volume = this.muted ? 0 : volume;
+            }
         }
     }
 
@@ -122,6 +130,13 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
         return this.observeCurrentPlayer().pipe(
             switchMap((player) => (player ? merge(this.error$, player.observeError()) : EMPTY)),
             filter(() => !this.stopped)
+        );
+    }
+
+    observeNowPlaying(station: PlaylistItem): Observable<PlaylistItem> {
+        return this.observeCurrentPlayer().pipe(
+            switchMap((player) => player?.observeNowPlaying?.(station) || of(station)),
+            distinctUntilChanged()
         );
     }
 

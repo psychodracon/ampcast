@@ -16,11 +16,14 @@ import {
     take,
     tap,
 } from 'rxjs';
+import LinearType from 'types/LinearType';
 import MediaService from 'types/MediaService';
 import PlayableItem from 'types/PlayableItem';
+import PlaylistItem from 'types/PlaylistItem';
 import Player from 'types/Player';
 import {Logger} from 'utils';
 import {MAX_DURATION} from 'services/constants';
+import {observeInternetRadioTrack} from 'services/internetRadio';
 import {getServiceFromSrc, waitForLogin} from 'services/mediaServices';
 
 export default class HTML5Player implements Player<PlayableItem> {
@@ -35,6 +38,7 @@ export default class HTML5Player implements Player<PlayableItem> {
     protected loadedSrc = '';
     protected stopped = false;
     autoplay = false;
+    loop = false;
     #muted = true;
     #volume = 1;
 
@@ -102,6 +106,14 @@ export default class HTML5Player implements Player<PlayableItem> {
             )
             .subscribe(this.logger);
 
+        // Loop playback, using `element.loop` means we don't get an `ended` event.
+        fromEvent(this.element, 'ended')
+            .pipe(
+                filter(() => this.loop),
+                tap(() => this.safePlay())
+            )
+            .subscribe(this.logger);
+
         fromEvent(element, 'error')
             .pipe(map(() => element.error))
             .subscribe(this.error$);
@@ -139,14 +151,6 @@ export default class HTML5Player implements Player<PlayableItem> {
 
     get item(): PlayableItem | null {
         return this.item$.value;
-    }
-
-    get loop(): boolean {
-        return this.element.loop;
-    }
-
-    set loop(loop: boolean) {
-        this.element.loop = loop;
     }
 
     get muted(): boolean {
@@ -211,6 +215,22 @@ export default class HTML5Player implements Player<PlayableItem> {
 
     observeError(): Observable<unknown> {
         return this.error$;
+    }
+
+    observeNowPlaying(station: PlaylistItem): Observable<PlaylistItem> {
+        return station.linearType === LinearType.Station && /^https?:/.test(station.src)
+            ? this.observePaused().pipe(
+                  switchMap((paused) =>
+                      paused
+                          ? of(station)
+                          : observeInternetRadioTrack(station).pipe(
+                                map((track) =>
+                                    track && track.stationSrc === station.src ? track : station
+                                )
+                            )
+                  )
+              )
+            : of(station);
     }
 
     observePlaying(): Observable<void> {
@@ -307,6 +327,11 @@ export default class HTML5Player implements Player<PlayableItem> {
     }
 
     protected getMediaSrc(item: PlayableItem): string {
+        if (item.blobUrl) {
+            return item.blobUrl;
+        } else if (item.blob) {
+            return URL.createObjectURL(item.blob);
+        }
         const service = getServiceFromSrc(item);
         // This should throw if you're not logged in.
         const src = service?.getPlayableUrl?.(item) ?? item.src;
@@ -318,7 +343,11 @@ export default class HTML5Player implements Player<PlayableItem> {
 
     protected async loadAndPlay(item: PlayableItem): Promise<void> {
         const mediaSrc = this.getMediaSrc(item);
-        if (this.element.getAttribute('src') !== mediaSrc) {
+        const currentSrc = this.element.getAttribute('src');
+        if (currentSrc !== mediaSrc) {
+            if (currentSrc?.startsWith('blob:')) {
+                URL.revokeObjectURL(currentSrc);
+            }
             this.element.setAttribute('src', mediaSrc);
         }
         this.loadedSrc = item.src;
@@ -341,6 +370,10 @@ export default class HTML5Player implements Player<PlayableItem> {
 
     protected async safePlay(): Promise<void> {
         try {
+            const service = this.item ? getServiceFromSrc(this.item) : undefined;
+            if (service && !service.isLoggedIn()) {
+                throw new Error('Not logged in');
+            }
             if (this.element.paused) {
                 await this.element.play();
             } else {
