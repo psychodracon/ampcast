@@ -1,8 +1,19 @@
-import {filter, firstValueFrom, fromEvent, map, merge, race, takeUntil, timer} from 'rxjs';
+import {
+    debounceTime,
+    filter,
+    firstValueFrom,
+    fromEvent,
+    map,
+    merge,
+    race,
+    takeUntil,
+    timer,
+} from 'rxjs';
 import {Writable} from 'type-fest';
 import MediaPlayback from 'types/MediaPlayback';
 import PlaybackState from 'types/PlaybackState';
 import PlaylistItem from 'types/PlaylistItem';
+import ScrobbleData from 'types/ScrobbleData';
 import {Logger, isMiniPlayer} from 'utils';
 import {MAX_DURATION} from 'services/constants';
 import {loadMediaServices} from 'services/mediaServices';
@@ -11,6 +22,7 @@ import theme from 'services/theme';
 import {nextVisualizer, observeCurrentVisualizer} from 'services/visualizer';
 import mediaPlayer from './mediaPlayer';
 import playback from './playback';
+import miniPlayerSettings from './miniPlayerSettings';
 
 const logger = new Logger('miniPlayerRemote');
 
@@ -41,6 +53,12 @@ const connect = (
     const setItem = (item: PlaylistItem | null) => {
         document.title = item ? getTitle(item) : defaultTitle;
         playlist.setItems(item ? [item] : []);
+    };
+
+    const setScrobbleData = (scrobbleAs: ScrobbleData) => {
+        if (playback.currentItem) {
+            playback.currentItem = {...playback.currentItem, scrobbleAs};
+        }
     };
 
     const transferPlayback = async (transferredState: PlaybackState) => {
@@ -114,6 +132,15 @@ const connect = (
         )
         .subscribe(({providerId, name}) => emitEvent('visualizer-change', {providerId, name}));
 
+    fromEvent(window, 'resize')
+        .pipe(debounceTime(50))
+        .subscribe(() => {
+            if (!document.fullscreenElement) {
+                miniPlayerSettings.width = window.outerWidth;
+                miniPlayerSettings.height = window.outerHeight;
+            }
+        });
+
     window.addEventListener('message', (event: MessageEvent) => {
         if (event.origin !== location.origin || event.source !== opener) {
             return;
@@ -185,6 +212,10 @@ const connect = (
                 setItem(data);
                 break;
 
+            case 'set-scrobble-data':
+                setScrobbleData(data);
+                break;
+
             case 'transfer-playback': {
                 transferPlayback(data);
                 break;
@@ -205,6 +236,11 @@ const next = (): void => {
     emitEvent('next');
 };
 
+const onScrobbleDataChange = (src: string, scrobbleAs: ScrobbleData): void => {
+    logger.log('onScrobbleDataChange');
+    emitEvent('scrobble-data-change', {src, scrobbleAs});
+};
+
 const emitEvent = (eventType: string, data?: any): void => {
     if (opener) {
         const name = `mini-player-on-${eventType}`;
@@ -216,6 +252,7 @@ const miniPlayerRemote = {
     connect,
     prev,
     next,
+    onScrobbleDataChange,
 };
 
 export default miniPlayerRemote;

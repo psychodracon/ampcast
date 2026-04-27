@@ -7,8 +7,10 @@ import './MiniPlayer.scss';
 export default function MiniPlayer() {
     return (
         <div className="mini-player">
-            <AppTitle />
-            <AppDragRegion />
+            <header>
+                <AppTitle />
+                <AppDragRegion />
+            </header>
             <Media />
         </div>
     );

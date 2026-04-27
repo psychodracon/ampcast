@@ -112,11 +112,15 @@ export const spotifySearch: MediaMultiSource = {
                 sort: spotifyArtistAlbumsSort,
             },
         }),
-        createSearch<MediaPlaylist>(ItemType.Playlist, {
-            id: 'playlists',
-            title: 'Playlists',
-            secondaryItems: spotifyPlaylistItems,
-        }),
+        ...(spotifySettings.restrictedApi
+            ? []
+            : [
+                  createSearch<MediaPlaylist>(ItemType.Playlist, {
+                      id: 'playlists',
+                      title: 'Playlists',
+                      secondaryItems: spotifyPlaylistItems,
+                  }),
+              ]),
     ],
 };
 
@@ -318,6 +322,7 @@ const spotifyNewReleases: MediaSource<MediaAlbum> = {
     icon: 'album',
     itemType: ItemType.Album,
     defaultHidden: true,
+    disabled: isRestrictedApi,
     primaryItems: {
         layout: {
             ...albumsLayout,
@@ -415,6 +420,7 @@ if (isRestrictedApi) {
         [spotifyCharts.id]: true,
         [spotifyFeaturedPlaylists.id]: true,
         [spotifyPlaylistsByCategory.id]: true,
+        [spotifyNewReleases.id]: true,
     });
 }
 
@@ -440,7 +446,12 @@ export function createSearchPager<T extends MediaObject>(
     options?: Partial<PagerConfig<T>>,
 ): Pager<T> {
     if (q) {
-        return new SpotifyPager(search(itemType, q), {maxSize: 250, ...options});
+        const restrictedApi = spotifySettings.restrictedApi;
+        return new SpotifyPager(search(itemType, q), {
+            maxSize: restrictedApi ? 100 : 200,
+            pageSize: restrictedApi ? 10 : 40,
+            ...options,
+        });
     } else {
         return new SimplePager<T>();
     }

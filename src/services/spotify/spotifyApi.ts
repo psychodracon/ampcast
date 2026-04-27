@@ -30,7 +30,7 @@ const playlistItemsChunkSize = 100;
 async function addPlaylistItems(
     playlistId: string,
     uris: readonly string[],
-    position?: number,
+    position?: number
 ): Promise<void> {
     const chunks = chunk(uris, playlistItemsChunkSize);
     if (typeof position === 'number') {
@@ -44,8 +44,8 @@ async function addPlaylistItems(
 async function addToLibrary(uris: readonly string[]): Promise<void> {
     await Promise.all(
         chunk(uris, libraryItemsChunkSize).map((uris) =>
-            spotifyApiCall('/me/library', {uris}, {method: 'PUT'}),
-        ),
+            spotifyApiCall('/me/library', {uris}, {method: 'PUT'})
+        )
     );
 }
 
@@ -55,7 +55,7 @@ async function changePlaylistDetails(
         name?: string;
         description?: string;
         public?: boolean;
-    },
+    }
 ): Promise<SpotifyApi.PlaylistSnapshotResponse> {
     return post(`/playlists/${playlistId}`, details);
 }
@@ -67,7 +67,7 @@ async function clearPlaylist(id: string): Promise<void> {
 async function createPlaylist(
     name: string,
     description = '',
-    isPublic = true,
+    isPublic = true
 ): Promise<SpotifyApi.CreatePlaylistResponse> {
     return post('/me/playlists', {name, description, public: isPublic});
 }
@@ -80,7 +80,7 @@ async function getAlbum(id: string): Promise<SpotifyApi.SingleAlbumResponse> {
 async function getAlbumTracks(
     id: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = libraryItemsChunkSize
 ): Promise<SpotifyApi.AlbumTracksResponse> {
     const market = spotifySettings.market;
     return get(`/albums/${id}/tracks`, {offset, limit, market});
@@ -93,8 +93,8 @@ async function getArtist(id: string): Promise<SpotifyApi.SingleArtistResponse> {
 async function getArtistAlbums(
     id: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
-    include_groups = '',
+    limit = 10,
+    include_groups = ''
 ): Promise<SpotifyApi.ArtistsAlbumsResponse> {
     const market = spotifySettings.market;
     return get(`/artists/${id}/albums`, {offset, limit, include_groups, market});
@@ -112,7 +112,7 @@ async function getAudioAnalysisForTrack(id: string): Promise<any> {
 async function getCategories(
     offset = 0,
     limit = libraryItemsChunkSize,
-    locale = navigator.language.replace('-', '_'),
+    locale = navigator.language.replace('-', '_')
 ): Promise<SpotifyApi.MultipleCategoriesResponse> {
     return get('/browse/categories', {offset, limit, locale});
 }
@@ -120,7 +120,7 @@ async function getCategories(
 async function getCategoryPlaylists(
     categoryId: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = libraryItemsChunkSize
 ): Promise<SpotifyApi.CategoryPlaylistsResponse> {
     return get(`/browse/categories/${categoryId}/playlists`, {offset, limit});
 }
@@ -128,14 +128,14 @@ async function getCategoryPlaylists(
 async function getFeaturedPlaylists(
     offset = 0,
     limit = libraryItemsChunkSize,
-    locale = navigator.language.replace('-', '_'),
+    locale = navigator.language.replace('-', '_')
 ): Promise<SpotifyApi.ListOfFeaturedPlaylistsResponse> {
     return get('/browse/featured-playlists', {offset, limit, locale});
 }
 
 async function getFollowedArtists(
     after = '',
-    limit = 50,
+    limit = 50
 ): Promise<SpotifyApi.UsersFollowedArtistsResponse> {
     return get('/me/following', {type: 'artist', after, limit});
 }
@@ -143,8 +143,8 @@ async function getFollowedArtists(
 async function getLibraryContains(uris: readonly string[]): Promise<readonly boolean[]> {
     const values = await Promise.all(
         chunk(uris, libraryItemsChunkSize).map((uris) =>
-            get<readonly boolean[]>('/me/library/contains', {uris}),
-        ),
+            get<readonly boolean[]>('/me/library/contains', {uris})
+        )
     );
     return values.flat();
 }
@@ -160,7 +160,7 @@ async function getMyAlbums(offset = 0, limit = 50): Promise<SpotifyApi.UsersSave
 
 async function getMyPlaylists(
     offset = 0,
-    limit = 50,
+    limit = 50
 ): Promise<SpotifyApi.ListOfCurrentUsersPlaylistsResponse> {
     return get('/me/playlists', {offset, limit});
 }
@@ -172,7 +172,7 @@ async function getMyTracks(offset = 0, limit = 50): Promise<SpotifyApi.UsersSave
 
 async function getNewReleases(
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = libraryItemsChunkSize
 ): Promise<SpotifyApi.ListOfNewReleasesResponse> {
     return get('/browse/new-releases', {offset, limit});
 }
@@ -185,7 +185,7 @@ async function getPlaylist(id: string, fields = ''): Promise<SpotifyApi.SinglePl
 async function getPlaylistItems(
     playlistId: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = 50
 ): Promise<SpotifyApi.PlaylistItemResponse> {
     const market = spotifySettings.market;
     return get(`/playlists/${playlistId}/items`, {offset, limit, market});
@@ -193,7 +193,7 @@ async function getPlaylistItems(
 
 async function getRecentlyPlayedTracks(
     limit = libraryItemsChunkSize,
-    options?: {after: number} | {before: number},
+    options?: {after: number} | {before: number}
 ): Promise<SpotifyApi.UsersRecentlyPlayedTracksResponse> {
     return get('/me/player/recently-played', {limit, ...options});
 }
@@ -206,8 +206,8 @@ async function getTrack(id: string): Promise<SpotifyApi.SingleTrackResponse> {
 async function removeFromLibrary(uris: readonly string[]): Promise<void> {
     await Promise.all(
         chunk(uris, libraryItemsChunkSize).map((uris) =>
-            spotifyApiCall('/me/library', {uris}, {method: 'DELETE'}),
-        ),
+            spotifyApiCall('/me/library', {uris}, {method: 'DELETE'})
+        )
     );
 }
 
@@ -216,7 +216,7 @@ async function removePlaylistItems(playlistId: string, uris: readonly string[]):
         chunk(uris, playlistItemsChunkSize).map((uris) => {
             const items = uris.map((uri) => ({uri}));
             del(`/playlists/${playlistId}/items`, {items});
-        }),
+        })
     );
 }
 
@@ -224,7 +224,7 @@ async function search<T extends SpotifyApi.SearchResponse>(
     type: string,
     q: string,
     offset: number,
-    limit: number,
+    limit: number
 ): Promise<T> {
     const market = spotifySettings.market;
     return get('/search', {q, type, offset, limit, market});
@@ -233,7 +233,7 @@ async function search<T extends SpotifyApi.SearchResponse>(
 async function searchAlbums(
     q: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = libraryItemsChunkSize
 ): Promise<SpotifyApi.AlbumSearchResponse> {
     return search('album', q, offset, limit);
 }
@@ -241,7 +241,7 @@ async function searchAlbums(
 async function searchArtists(
     q: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = libraryItemsChunkSize
 ): Promise<SpotifyApi.ArtistSearchResponse> {
     return search('artist', q, offset, limit);
 }
@@ -249,7 +249,7 @@ async function searchArtists(
 async function searchPlaylists(
     q: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = libraryItemsChunkSize
 ): Promise<SpotifyApi.PlaylistSearchResponse> {
     return search('playlist', q, offset, limit);
 }
@@ -257,14 +257,14 @@ async function searchPlaylists(
 async function searchTracks(
     q: string,
     offset = 0,
-    limit = libraryItemsChunkSize,
+    limit = libraryItemsChunkSize
 ): Promise<SpotifyApi.TrackSearchResponse> {
     return search('track', q, offset, limit);
 }
 
 async function updatePlaylistItems(
     playlistId: string,
-    uris: readonly string[],
+    uris: readonly string[]
 ): Promise<SpotifyApi.PlaylistSnapshotResponse> {
     return put(`/playlists/${playlistId}/items`, {uris});
 }
@@ -291,7 +291,7 @@ async function put<T>(path: string, params: Record<string, any>): Promise<T> {
 async function spotifyApiCall<T>(
     path: string,
     params: Record<string, any> | undefined,
-    init: RequestInit,
+    init: RequestInit
 ): Promise<T> {
     return spotifyApiCallWithRetry(async () => {
         const {token} = spotifySettings;

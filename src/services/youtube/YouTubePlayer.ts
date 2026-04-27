@@ -110,7 +110,7 @@ export default class YouTubePlayer implements Player<PlayableItem> {
                     }
                 })
             )
-            .subscribe(this.logger);
+            .subscribe(logger);
 
         this.observeVideoSize()
             .pipe(
@@ -145,7 +145,7 @@ export default class YouTubePlayer implements Player<PlayableItem> {
     }
 
     get hidden(): boolean {
-        return this.element.hidden;
+        return !!this.element.hidden;
     }
 
     set hidden(hidden: boolean) {

@@ -15,7 +15,11 @@ import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import PlaybackType from 'types/PlaybackType';
 import Thumbnail from 'types/Thumbnail';
-import {Logger, browser, getTextFromHtml} from 'utils';
+import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
+import WrappedPager from 'services/pagers/WrappedPager';
+import fetchFirstPage from 'services/pagers/fetchFirstPage';
+import pinStore from 'services/pins/pinStore';
+import {Logger, getTextFromHtml} from 'utils';
 import spotifyApi, {
     SpotifyAlbum,
     SpotifyArtist,
@@ -33,7 +37,7 @@ const logger = new Logger('spotifyUtils');
 export function createMediaObject<T extends MediaObject>(
     item: SpotifyItem,
     inLibrary?: boolean | undefined,
-    position?: number,
+    position?: number
 ): T {
     switch (item.type) {
         case 'episode':
@@ -110,7 +114,7 @@ function createMediaArtist(artist: SpotifyArtist, inLibrary?: boolean | undefine
 export function createSortableMediaArtist(
     artist: any,
     inLibrary?: boolean | undefined,
-    sortId?: string,
+    sortId?: string
 ): MediaArtist {
     return {
         itemType: ItemType.Artist,
@@ -129,10 +133,10 @@ export function createSortableMediaArtist(
 
 function createMediaPlaylist(
     playlist: SpotifyPlaylist,
-    inLibrary?: boolean | undefined,
+    inLibrary?: boolean | undefined
 ): MediaPlaylist {
     const owned = playlist.owner.id === spotifySettings.userId;
-    const trackCount = playlist.tracks.total;
+    const trackCount = playlist.items?.total;
 
     const mediaPlaylist: Writable<SetOptional<MediaPlaylist, 'pager'>> = {
         itemType: ItemType.Playlist,
@@ -156,7 +160,7 @@ function createMediaPlaylist(
             ? {
                   deletable: true,
                   droppable: true,
-                  moveable: trackCount <= SpotifyPlaylistItemsPager.MAX_SIZE_FOR_REORDER,
+                  moveable: (trackCount || 0) <= SpotifyPlaylistItemsPager.MAX_SIZE_FOR_REORDER,
               }
             : undefined,
     };
@@ -167,9 +171,9 @@ function createMediaPlaylist(
 export function createMediaItemFromTrack(
     track: SpotifyTrack,
     inLibrary?: boolean | undefined,
-    position?: number,
+    position?: number
 ): MediaItem {
-    const externalUrl = track.external_urls.spotify;
+    const externalUrl = track.external_urls?.spotify;
     const album = track.album;
 
     return {
@@ -208,13 +212,11 @@ function createArtistAlbumsPager(artist: SpotifyArtist): Pager<MediaAlbum> {
 
 export function createSortableArtistAlbumsPager(
     artist: SpotifyArtist,
-    sortId?: string,
+    sortId?: string
 ): Pager<MediaAlbum> {
     const topTracks = createArtistTopTracks(artist);
     const topTracksPager = new SimpleMediaPager<MediaAlbum>(async () => {
         try {
-            // This uses a deprecated API call.
-            // Keep it, because it's quite a nice feature, and may still work in some older clients.
             const items = await fetchFirstPage(topTracks.pager, {keepAlive: true});
             if (items.length === 0) {
                 topTracks.pager.disconnect();
@@ -223,29 +225,28 @@ export function createSortableArtistAlbumsPager(
                 return [topTracks];
             }
         } catch (err) {
-            if (browser.isAmpcastApp) {
-                // It should work here.
-                // It may also work in some clients but we won't log the error.
-                logger.error(err);
-            }
+            logger.error(err);
             topTracks.pager.disconnect();
             return [];
         }
     });
 
-    const fetchArtistAlbums = async (offset: number, limit: number): Promise<SpotifyPage> => {
-        const {items, total, next} = await spotifyApi.getArtistAlbums(
-            artist.id,
-            offset,
-            limit,
-            'album,compilation,single',
-        );
-        return {items: items as SpotifyAlbum[], total, next};
-    };
-
-    const albumsPager = sortId
-        ? new SpotifyClientSortPager<MediaAlbum>(fetchArtistAlbums, sortId, {pageSize: 50}, false)
-        : new SpotifyPager<MediaAlbum>(fetchArtistAlbums);
+    const albumsPager = new SpotifyPager<MediaAlbum>(
+        async (offset: number, limit: number): Promise<SpotifyPage> => {
+            const {items, total, next} = await spotifyApi.getArtistAlbums(
+                artist.id,
+                offset,
+                limit,
+                'album,compilation,single'
+            );
+            return {items: items as SpotifyAlbum[], total, next};
+        },
+        {pageSize: spotifySettings.restrictedApi ? 10 : 40}
+    );
+    if (spotifySettings.restrictedApi) {
+        // "Top Tracks" not supported.
+        return albumsPager;
+    }
 
     return new WrappedPager(topTracksPager, albumsPager);
 }
@@ -269,7 +270,7 @@ function createTopTracksPager(artist: SpotifyArtist): Pager<MediaItem> {
             const {tracks} = await spotifyApi.getArtistTopTracks(artist.id);
             return {items: tracks as SpotifyTrack[], next: ''};
         },
-        {pageSize: 30, maxSize: 100},
+        {pageSize: 30, maxSize: 100}
     );
 }
 
@@ -281,21 +282,28 @@ function createAlbumTracksPager(album: SpotifyAlbum): Pager<MediaItem> {
                 createMediaItemFromTrack({
                     ...track,
                     album: album as SpotifyApi.AlbumObjectSimplified,
-                }),
+                })
             );
             return items;
         });
     } else {
-        return new SpotifyPager(async (offset: number, limit: number): Promise<SpotifyPage> => {
-            const {items, total, next} = await spotifyApi.getAlbumTracks(album.id, offset, limit);
-            return {
-                items: items.map((item) => ({
-                    ...item,
-                    album: album as SpotifyApi.AlbumObjectSimplified,
-                })),
-                total,
-                next,
-            };
-        });
+        return new SpotifyPager(
+            async (offset: number, limit: number): Promise<SpotifyPage> => {
+                const {items, total, next} = await spotifyApi.getAlbumTracks(
+                    album.id,
+                    offset,
+                    limit
+                );
+                return {
+                    items: items.map((item) => ({
+                        ...item,
+                        album: album as SpotifyApi.AlbumObjectSimplified,
+                    })),
+                    total,
+                    next,
+                };
+            },
+            {autofill: true, autofillInterval: 500, autofillMaxPages: 10}
+        );
     }
 }

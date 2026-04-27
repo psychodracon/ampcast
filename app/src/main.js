@@ -2,6 +2,7 @@ import {
     app,
     components,
     ipcMain,
+    protocol,
     safeStorage,
     shell,
     BrowserWindow,
@@ -30,12 +31,10 @@ if (!app.requestSingleInstanceLock()) {
     app.quit();
 }
 
-if (!app.isPackaged) {
-    // https://github.com/electron/electron/issues/38790
-    app.commandLine.appendSwitch('disable-features', 'WidgetLayering');
-}
-
 initSystemAudio();
+
+const appIcon = nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
+appIcon.setTemplateImage(true);
 
 const loginUrls = [
     'https://authorize.music.apple.com/',
@@ -70,9 +69,6 @@ async function createSplashScreen(mainWindowState) {
 }
 
 async function createMainWindow(url, mainWindowState) {
-    const image = nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
-    image.setTemplateImage(true);
-
     const {x, y, width, height} = mainWindowState;
 
     mainWindow = new BrowserWindow({
@@ -83,7 +79,7 @@ async function createMainWindow(url, mainWindowState) {
         height,
         minWidth: 800,
         minHeight: 600,
-        icon: image,
+        icon: appIcon,
         backgroundColor: '#32312f',
         titleBarStyle: 'hidden',
         titleBarOverlay: {
@@ -99,12 +95,40 @@ async function createMainWindow(url, mainWindowState) {
 
     // Open links in the default browser.
     mainWindow.webContents.setWindowOpenHandler(({url}) => {
-        // Ignore links from login buttons.
-        if (loginUrls.some((loginUrl) => url.startsWith(loginUrl))) {
-            return {action: 'allow'};
+        if (url === `http://localhost:${server.port}/#mini-player`) {
+            return {
+                action: 'allow',
+                overrideBrowserWindowOptions: {
+                    backgroundColor: '#32312f',
+                    titleBarStyle: 'hidden',
+                    titleBarOverlay: {
+                        color: 'rgba(0,0,0,0)',
+                        symbolColor: 'white',
+                        height: 24,
+                    },
+                    minimizable: false,
+                    maximizable: false,
+                    alwaysOnTop: true,
+                    skipTaskbar: true,
+                    webPreferences: {
+                        preload: path.join(__dirname, 'preload.js'),
+                    },
+                },
+            };
+        } else if (loginUrls.some((loginUrl) => url.startsWith(loginUrl))) {
+            return {
+                action: 'allow',
+                overrideBrowserWindowOptions: {
+                    icon: appIcon,
+                    minimizable: false,
+                    autoHideMenuBar: true,
+                    modal: true,
+                },
+            };
+        } else {
+            shell.openExternal(url);
+            return {action: 'deny'};
         }
-        shell.openExternal(url);
-        return {action: 'deny'};
     });
 
     mainWindowState.manage(mainWindow);
@@ -194,15 +218,32 @@ app.whenReady().then(async () => {
         let [port] = await Promise.all([server.start(), components.whenReady()]);
         let url = `http://localhost:${port}/`;
 
+        protocol.handle('ampcast', (request) => {
+            const pathname = request.url.slice('ampcast://'.length);
+            if (pathname.startsWith('auth/spotify/callback/')) {
+                return new Response('', {
+                    status: 302,
+                    headers: {Location: `${url}${pathname}`},
+                });
+            } else {
+                return new Response('<h1>Not found</h1>', {
+                    headers: {
+                        status: 404,
+                        'content-type': 'text/html',
+                    },
+                });
+            }
+        });
+
         contextMenu({showSaveImageAs: true, showSelectAll: false});
         Menu.setApplicationMenu(Menu.buildFromTemplate(menu));
         createBridge();
 
         await createMainWindow(url, mainWindowState);
-        splash.close();
+        splash.destroy();
         await checkForUpdatesAndNotify();
 
-        // For mac apparently.
+        // For macOS.
         app.on('activate', async () => {
             if (BrowserWindow.getAllWindows().length === 0) {
                 if (!mainWindow) {

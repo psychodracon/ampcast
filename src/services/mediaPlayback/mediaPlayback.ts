@@ -134,16 +134,18 @@ function loadNext(item: PlaylistItem | null): void {
 
 export function play(): void {
     logger.log('play');
-    mediaPlayback.autoplay = true;
-    currentNavigation = 'next';
-    unlockLoading();
-    if (miniPlayer.active) {
-        miniPlayer.play();
-    } else {
-        playback.play();
-        if (!playback.paused) {
-            mediaPlayer.play();
-            visualizerPlayer.play();
+    if (playlist.size > 0) {
+        currentNavigation = 'next';
+        unlockLoading();
+        mediaPlayback.autoplay = true;
+        if (miniPlayer.active) {
+            miniPlayer.play();
+        } else {
+            playback.play();
+            if (!playback.paused) {
+                mediaPlayer.play();
+                visualizerPlayer.play();
+            }
         }
     }
 }
@@ -399,6 +401,7 @@ const mediaPlayback: MediaPlayback = {
 
 export default mediaPlayback;
 
+// Synch playback settings.
 observePlaybackSettings()
     .pipe(
         tap(({volume, muted, repeatMode}) => {
@@ -409,6 +412,7 @@ observePlaybackSettings()
     )
     .subscribe(logger);
 
+// Connect miniPlayer.
 if (isMiniPlayer) {
     miniPlayerRemote.connect(mediaPlayback, lockLoading, unlockLoading);
 } else {
@@ -529,7 +533,7 @@ if (!isMiniPlayer) {
                           map(({duration}) => duration),
                           distinctUntilChanged(),
                           filter((duration) => !!duration && duration !== item.duration),
-                          take(2),
+                          take(2), // If the duration keeps changing then maybe it's not so reliable.
                           tap((duration) =>
                               dispatchMetadataChanges({
                                   match: (object) => object.src === item.src,
@@ -559,7 +563,7 @@ if (!isMiniPlayer) {
         )
         .subscribe(logger);
 
-    // Pre-load next item.
+    // Load current item and pre-load next item.
     loadingLocked$
         .pipe(
             distinctUntilChanged(),
@@ -602,6 +606,17 @@ if (!isMiniPlayer) {
             skip(1),
             distinctUntilChanged((a, b) => a?.id === b?.id),
             filter(() => mediaPlayback.repeatMode === RepeatMode.One),
+            tap(() => (mediaPlayback.repeatMode = RepeatMode.None))
+        )
+        .subscribe(logger);
+
+    // Reset repeat mode if the playlist is cleared.
+    playlist
+        .observeSize()
+        .pipe(
+            map((size) => size === 0),
+            distinctUntilChanged(),
+            filter((isEmpty) => isEmpty),
             tap(() => (mediaPlayback.repeatMode = RepeatMode.None))
         )
         .subscribe(logger);
