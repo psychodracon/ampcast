@@ -16,11 +16,6 @@ import Pager from 'types/Pager';
 import PlaybackType from 'types/PlaybackType';
 import Thumbnail from 'types/Thumbnail';
 import {Logger, getTextFromHtml} from 'utils';
-import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
-import WrappedPager from 'services/pagers/WrappedPager';
-import fetchFirstPage from 'services/pagers/fetchFirstPage';
-import pinStore from 'services/pins/pinStore';
-import {Logger, getTextFromHtml} from 'utils';
 import spotifyApi, {
     SpotifyAlbum,
     SpotifyArtist,
