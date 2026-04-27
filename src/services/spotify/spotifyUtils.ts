@@ -15,6 +15,7 @@ import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import PlaybackType from 'types/PlaybackType';
 import Thumbnail from 'types/Thumbnail';
+import {Logger, getTextFromHtml} from 'utils';
 import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
 import WrappedPager from 'services/pagers/WrappedPager';
 import fetchFirstPage from 'services/pagers/fetchFirstPage';
@@ -231,18 +232,25 @@ export function createSortableArtistAlbumsPager(
         }
     });
 
-    const albumsPager = new SpotifyPager<MediaAlbum>(
-        async (offset: number, limit: number): Promise<SpotifyPage> => {
-            const {items, total, next} = await spotifyApi.getArtistAlbums(
-                artist.id,
-                offset,
-                limit,
-                'album,compilation,single'
-            );
-            return {items: items as SpotifyAlbum[], total, next};
-        },
-        {pageSize: spotifySettings.restrictedApi ? 10 : 40}
-    );
+    const fetchArtistAlbums = async (offset: number, limit: number): Promise<SpotifyPage> => {
+        const {items, total, next} = await spotifyApi.getArtistAlbums(
+            artist.id,
+            offset,
+            limit,
+            'album,compilation,single'
+        );
+        return {items: items as SpotifyAlbum[], total, next};
+    };
+
+    const albumsPager = sortId
+        ? new SpotifyClientSortPager<MediaAlbum>(
+              fetchArtistAlbums,
+              sortId,
+              {pageSize: spotifySettings.restrictedApi ? 10 : 40},
+              false
+          )
+        : new SpotifyPager<MediaAlbum>(fetchArtistAlbums);
+
     if (spotifySettings.restrictedApi) {
         // "Top Tracks" not supported.
         return albumsPager;
