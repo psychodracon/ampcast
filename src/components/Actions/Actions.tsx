@@ -6,7 +6,9 @@ import LinearType from 'types/LinearType';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaService from 'types/MediaService';
+import {isListen} from 'services/localdb/listens';
 import {getService, getServiceFromSrc} from 'services/mediaServices';
+import {isServiceVisible} from 'services/mediaServices/servicesSettings';
 import {IconButton, IconButtons, PopupMenuButton} from 'components/Button';
 import {IconName} from 'components/Icon';
 import StarRating from 'components/StarRating';
@@ -152,7 +154,10 @@ export default function Actions({
             {item.itemType === ItemType.Media &&
             item.linearType === LinearType.Station &&
             item.isFavoriteStation !== undefined &&
-            internetRadio?.canStore?.(item, inListView) ? (
+            internetRadio &&
+            isServiceVisible(internetRadio) &&
+            !(inListView && isListen(item)) &&
+            internetRadio.canStore?.(item, inListView) ? (
                 <IconButton
                     icon={item.isFavoriteStation ? 'heart-fill' : 'heart'}
                     title={

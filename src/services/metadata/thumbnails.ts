@@ -1,15 +1,15 @@
 import getYouTubeID from 'get-youtube-id';
 import unidecode from 'unidecode';
 import ItemType from 'types/ItemType';
+import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import Thumbnail from 'types/Thumbnail';
-import {exists} from 'utils';
 import lastfmApi from 'services/lastfm/lastfmApi';
 import {findListenByPlayedAt, getListens} from 'services/localdb/listens';
 import {getCoverArtThumbnails} from 'services/musicbrainz/coverart';
-import {getServiceFromSrc} from 'services/mediaServices';
+import {getServices} from 'services/mediaServices';
 import youtubeApi from 'services/youtube/youtubeApi';
 import {dispatchMetadataChanges} from './metadataChanges';
 import {getCoverArtFromBlob} from './music-metadata-js';
@@ -19,8 +19,13 @@ export async function findThumbnails(
     extendedSearch = false,
     signal?: AbortSignal
 ): Promise<readonly Thumbnail[] | undefined> {
-    if (!item || (item.itemType !== ItemType.Album && item.itemType !== ItemType.Media)) {
-        return undefined;
+    if (
+        !item ||
+        item.synthetic ||
+        (item.itemType !== ItemType.Album && item.itemType !== ItemType.Media) ||
+        (item.itemType === ItemType.Media && item.linearType === LinearType.Station)
+    ) {
+        return;
     }
     if (item.itemType === ItemType.Media) {
         const externalUrl = item.link?.externalUrl;
@@ -64,10 +69,11 @@ export async function findThumbnails(
     return thumbnails;
 }
 
-export function getThumbnailUrl(item: MediaObject, thumbnail: Thumbnail): string {
-    const service = getServiceFromSrc(item);
-    const url = thumbnail.url;
-    return service?.getThumbnailUrl?.(url) ?? url;
+export function getThumbnailUrl(thumbnail: Thumbnail): string {
+    return getServices().reduce(
+        (url, service) => service.getThumbnailUrl?.(url) || url,
+        thumbnail.url
+    );
 }
 
 export function isSameThumbnails(
@@ -108,12 +114,10 @@ function findThumbnailsInListens(item: MediaItem | MediaAlbum): readonly Thumbna
     const decode = (name: string) => unidecode(name).toLowerCase();
     const decodedAlbum = decode(album);
     const decodedArtist = decode(artist);
-    return getListens()
-        .filter(
-            (listen) =>
-                decode(listen.album || '') === decodedAlbum &&
-                decode(listen.albumArtist || listen.artists?.[0] || '') === decodedArtist
-        )
-        .map((listen) => listen.thumbnails)
-        .filter(exists)[0];
+    return getListens().find(
+        (listen) =>
+            listen.thumbnails &&
+            decode(listen.album || '') === decodedAlbum &&
+            decode(listen.albumArtist || listen.artists?.[0] || '') === decodedArtist
+    )?.thumbnails;
 }

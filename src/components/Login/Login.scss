@@ -2,7 +2,6 @@
 
 .login {
     text-align: center;
-    bottom: var(--gutter-width);
 
     .login-button,
     .credentials-button {
@@ -155,6 +154,16 @@
 
         .icon-link {
             display: none;
+        }
+    }
+
+    .error {
+        p {
+            margin-bottom: 0.5em;
+
+            & + p {
+                margin-top: 0;
+            }
         }
     }
 }

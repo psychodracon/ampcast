@@ -21,10 +21,11 @@ export default class ButterchurnPlayer extends AbstractVisualizerPlayer<Butterch
     private currentPreset: ButterchurnVisualizer | null = null;
 
     constructor({context, source}: AudioManager) {
-        super();
+        super('butterchurn');
+
         this.context = context;
         this.source = source;
-        this.canvas.className = 'visualizer visualizer-butterchurn';
+        this.canvas.className = 'visualizer-butterchurn visualizer';
         this.canvas.hidden = true;
 
         observeVisualizerSettings()
@@ -160,6 +161,8 @@ export default class ButterchurnPlayer extends AbstractVisualizerPlayer<Butterch
         }
         if (this.autoplay && !this.hidden) {
             this.animationFrameId = requestAnimationFrame(() => this.render());
+        } else {
+            this.animationFrameId = 0;
         }
     }
 

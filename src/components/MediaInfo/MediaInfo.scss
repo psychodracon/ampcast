@@ -78,6 +78,7 @@
         display: flex;
         margin-top: 0.5em;
         gap: 0.25em;
+        overflow-wrap: anywhere;
 
         .text-label {
             white-space: nowrap;
@@ -95,6 +96,7 @@
         flex-direction: row;
         align-items: center;
         margin-top: 1.625em;
+        line-height: normal;
     }
 
     .genre {
@@ -146,44 +148,10 @@
     }
 
     .scrobbling-options {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
         margin-top: 1.5em;
         border-top: 1px solid;
         padding-top: 1.5em;
         font-size: 0.75em;
-
-        .button {
-            margin-left: auto;
-        }
-    }
-
-    &-lyrics {
-        height: 100%;
-
-        .text-box {
-            max-height: 100%;
-            line-height: 1.5;
-            font-family: system-ui;
-            font-style: italic;
-
-            .scrollable {
-                --scrollbar-width: max(10px, calc(1em * var(--scrollbar-size)));
-            }
-
-            p {
-                margin: 0;
-
-                &:empty {
-                    margin-top: 1em;
-                }
-            }
-        }
-
-        .error-box {
-            border: 0;
-            padding: 0;
-        }
+        line-height: 1.2;
     }
 }

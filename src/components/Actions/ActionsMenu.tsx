@@ -7,7 +7,9 @@ import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaSource from 'types/MediaSource';
 import {browser} from 'utils';
+import {isListen} from 'services/localdb/listens';
 import {getService, getServiceFromSrc} from 'services/mediaServices';
+import {isServiceVisible} from 'services/mediaServices/servicesSettings';
 import PopupMenu, {
     PopupMenuItem,
     PopupMenuProps,
@@ -181,13 +183,11 @@ function ContextualActions<T extends MediaObject>({
                 />
             ) : null}
 
-            {/* remove doesn't work (https://developer.apple.com/forums/thread/107807) */}
-            {service?.id !== 'apple' &&
-            item.inLibrary === true &&
-            service?.canStore?.(item, inListView) ? (
+            {item.inLibrary === true && service?.canStore?.(item, inListView) ? (
                 <PopupMenuItem<Action>
                     label={getLabelForAction(service, Action.RemoveFromLibrary)}
                     value={Action.RemoveFromLibrary}
+                    disabled={service.id === 'apple'} // remove doesn't work (https://developer.apple.com/forums/thread/107807)
                     key={Action.RemoveFromLibrary}
                 />
             ) : null}
@@ -195,7 +195,10 @@ function ContextualActions<T extends MediaObject>({
             {item.itemType === ItemType.Media &&
             item.linearType === LinearType.Station &&
             item.isFavoriteStation !== undefined &&
-            internetRadio?.canStore?.(item, inListView) ? (
+            internetRadio &&
+            isServiceVisible(internetRadio) &&
+            !isListen(item) &&
+            internetRadio.canStore?.(item, inListView) ? (
                 <>
                     {source?.id === 'internet-radio/my-stations' ? (
                         <PopupMenuItem<Action>

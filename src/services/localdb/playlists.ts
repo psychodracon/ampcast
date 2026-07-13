@@ -4,18 +4,19 @@ import Dexie, {liveQuery} from 'dexie';
 import {nanoid} from 'nanoid';
 import {Except, Writable} from 'type-fest';
 import CreatePlaylistOptions from 'types/CreatePlaylistOptions';
+import {Field} from 'types/MediaListLayout';
 import ItemType from 'types/ItemType';
 import MediaItem from 'types/MediaItem';
 import MediaPlaylist from 'types/MediaPlaylist';
 import Pager, {PagerConfig} from 'types/Pager';
-import SortParams from 'types/SortParams';
 import UserData from 'types/UserData';
 import {Logger} from 'utils';
 import {getSourceSorting} from 'services/mediaServices/servicesSettings';
-import {removeUserData} from 'services/metadata';
+import {removeUserData, sorter, titleCompare} from 'services/metadata';
 import DexiePager from 'services/pagers/DexiePager';
 import SimplePager from 'services/pagers/SimplePager';
 import pinStore from 'services/pins/pinStore';
+import {localPlaylistItemsSort} from './localSorting';
 import LocalPlaylistItemsPager from './LocalPlaylistItemsPager';
 
 const logger = new Logger('playlists');
@@ -65,11 +66,7 @@ class PlaylistsStore extends Dexie {
         });
 
         liveQuery(() => this.playlists.toArray()).subscribe((playlists) =>
-            this.localPlaylists$.next(
-                playlists.sort((a, b) =>
-                    a.title.localeCompare(b.title, undefined, {sensitivity: 'base'})
-                )
-            )
+            this.localPlaylists$.next(playlists.sort((a, b) => titleCompare(a.title, b.title)))
         );
     }
 
@@ -246,7 +243,7 @@ class PlaylistsStore extends Dexie {
     ): Pager<MediaPlaylist> {
         const createChildPager = (
             playlist: MediaPlaylist,
-            itemSort?: SortParams
+            itemSort = localPlaylistItemsSort.defaultSort
         ): Pager<MediaItem> => {
             return new LocalPlaylistItemsPager(
                 async () => {
@@ -254,32 +251,13 @@ class PlaylistsStore extends Dexie {
                     items.forEach((item, index) => {
                         (item as Writable<LocalPlaylistItem>).position = index + 1;
                     });
-                    if (itemSort && !(itemSort.sortBy === 'position' && itemSort.sortOrder === 1)) {
-                        const {sortBy, sortOrder} = itemSort;
-                        return (items as LocalPlaylistItem[]).sort((a, b) => {
-                            switch (sortBy) {
-                                case 'title':
-                                    return (
-                                        a.title.localeCompare(b.title, undefined, {
-                                            sensitivity: 'base',
-                                        }) * sortOrder
-                                    );
-
-                                case 'artist':
-                                    return (
-                                        String(a.artists || '')
-                                            .replace(/^the\s+/i, '')
-                                            .localeCompare(
-                                                String(b.artists || '').replace(/^the\s+/i, ''),
-                                                undefined,
-                                                {sensitivity: 'base'}
-                                            ) * sortOrder
-                                    );
-
-                                default:
-                                    return ((a.position || 0) - (b.position || 0)) * sortOrder;
-                            }
-                        });
+                    const {sortBy, sortOrder} = itemSort;
+                    if (itemSort) {
+                        if (sortBy === 'Position') {
+                            return sortOrder === -1 ? items.toReversed() : items.slice();
+                        } else {
+                            return sorter.sort(items, sortBy as Field, sortOrder);
+                        }
                     }
                     return items;
                 },
@@ -357,7 +335,7 @@ class PlaylistsStore extends Dexie {
         return {...localPlaylistItem, id: nanoid()};
     }
 
-    private async getLocalPlaylistItems(src: string): Promise<readonly LocalPlaylistItem[]> {
+    async getLocalPlaylistItems(src: string): Promise<readonly LocalPlaylistItem[]> {
         const playlistItems = await this.playlistItems.get(src);
         return playlistItems?.items || [];
     }

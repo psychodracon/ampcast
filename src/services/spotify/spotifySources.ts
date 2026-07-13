@@ -1,7 +1,7 @@
 import {
     albumsLayout,
+    defaultMediaItemCard,
     mediaItemsLayout,
-    playlistItemsLayout,
     recentlyPlayedTracksLayout,
     songChartsLayout,
 } from 'components/MediaList/layouts';
@@ -37,9 +37,21 @@ const spotifyMediaItems: MediaSourceItems = {
     layout: removeGenre(mediaItemsLayout),
 };
 
+const spotifyPlaylistItemsLayout: Partial<MediaListLayout> = {
+    view: 'details',
+    card: defaultMediaItemCard,
+    details: ['Position', 'Title', 'Artist', 'Album', 'Duration', 'Year'],
+};
+
 export const spotifyPlaylistItems: MediaSourceItems<SetRequired<MediaItem, 'nanoId'>> = {
-    layout: removeGenre(playlistItemsLayout),
+    layout: spotifyPlaylistItemsLayout,
     itemKey: 'nanoId',
+    sort: {
+        defaultSort: {
+            sortBy: 'Position',
+            sortOrder: 1,
+        },
+    },
 };
 
 const spotifyLikedSongsSort: MediaListSort = {
@@ -375,6 +387,12 @@ const spotifyCharts: MediaSource<MediaPlaylist> = {
     disabled: isRestrictedApi,
     secondaryItems: {
         layout: removeGenre(songChartsLayout),
+        sort: {
+            defaultSort: {
+                sortBy: 'Position',
+                sortOrder: 1,
+            },
+        },
     },
 
     search(): Pager<MediaPlaylist> {

@@ -126,10 +126,10 @@ const connect = (
                 break;
 
             case 'scrobble-data-change': {
-                const {src, scrobbleAs} = data;
+                const {src, values} = data;
                 dispatchMetadataChanges({
                     match: (object) => object.src === src,
-                    values: {scrobbleAs},
+                    values,
                 });
                 break;
             }
@@ -186,14 +186,14 @@ const connect = (
 
     const handleClose = async (): Promise<void> => {
         const state: Writable<PlaybackState> = playback.getPlaybackState();
-        const {currentTime, playbackId, startedAt} = state;
+        const {currentTime, playbackId, startedAt, paused} = state;
         state.paused = true; // pause after transfer back
         playbackState$.next(state);
         playback.suspend();
         miniPlayerWindow = null;
         firstPlay = true;
         active$.next(false);
-        mediaPlayback.autoplay = false; // remain paused
+        mediaPlayback.autoplay = !paused;
         const currentItem = playlist.getCurrentItem();
         if (currentItem) {
             const isLiveStreaming =
@@ -237,7 +237,7 @@ const getPlaybackState = (): PlaybackState => playbackState$.value;
 const load = (item: PlaylistItem | null): void => {
     if (!isMiniPlayer) {
         if (miniPlayerWindow) {
-            logger.log('load', item?.src ?? null);
+            logger.log('load', item?.src, item?.startTime || 0);
             if (_autoplay) {
                 forceFocusOnFirstPlay();
             }
@@ -313,8 +313,8 @@ const setItem = (item: PlaylistItem | null): void => {
     setValue('item', safeMediaItem(item));
 };
 
-const setScrobbleData = (data: ScrobbleData): void => {
-    setValue('scrobble-data', data);
+const setScrobbleData = (values: ScrobbleData): void => {
+    setValue('scrobble-data', values);
 };
 
 const setValue = (name: string, value?: any): void => {

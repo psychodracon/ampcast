@@ -4,7 +4,7 @@ import PlaylistItem from 'types/PlaylistItem';
 import {CoverArtVisualizer} from 'types/Visualizer';
 import {Logger} from 'utils';
 import {observeAudioSettings} from 'services/audio';
-import {observeCurrentItem} from 'services/playlist';
+import {observeCurrentItem} from 'services/mediaPlayback/playback';
 import {isProviderSupported} from '../visualizer';
 import AbstractVisualizerPlayer from '../AbstractVisualizerPlayer';
 import visualizerSettings, {observeVisualizerSettings} from '../visualizerSettings';
@@ -16,11 +16,11 @@ const logger = new Logger('CovertArtPlayer');
 export default class CovertArtPlayer extends AbstractVisualizerPlayer<CoverArtVisualizer> {
     private readonly animatedBackground: AnimatedBackgroundPlayer;
     private readonly beatsPlayer: BeatsPlayer;
-    private beatsPauseTimer = 0;
+    private beatsPauseTimer: ReturnType<typeof setTimeout> | undefined;
     hidden = true;
 
     constructor(audio: AudioManager) {
-        super();
+        super('coverart');
 
         this.animatedBackground = new AnimatedBackgroundPlayer(audio);
         this.beatsPlayer = new BeatsPlayer(audio);
@@ -117,7 +117,8 @@ export default class CovertArtPlayer extends AbstractVisualizerPlayer<CoverArtVi
     pause(): void {
         this.animatedBackground.pause();
         // Don't pause the animation until it has faded out.
-        this.beatsPauseTimer = setTimeout(() => this.beatsPlayer.pause(), 3_000) as any;
+        clearTimeout(this.beatsPauseTimer);
+        this.beatsPauseTimer = setTimeout(() => this.beatsPlayer.pause(), 3_000);
     }
 
     stop(): void {

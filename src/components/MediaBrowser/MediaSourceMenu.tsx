@@ -16,14 +16,23 @@ import PopupMenu, {
     showPopupMenu,
 } from 'components/PopupMenu';
 
-export async function showMediaSourceMenu(
-    source: MediaSource<any>,
-    target: HTMLElement,
-    x: number,
-    y: number
-): Promise<void> {
+interface ShowMediaSourceMenuParams {
+    source: MediaSource;
+    target: HTMLElement;
+    x: number;
+    y: number;
+    isSearch?: boolean;
+    syntheticAlbumSource?: MediaSource | null;
+}
+
+export async function showMediaSourceMenu({
+    target,
+    x,
+    y,
+    ...params
+}: ShowMediaSourceMenuParams): Promise<void> {
     await showPopupMenu(
-        (props: PopupMenuProps) => <MediaSourceMenu {...props} source={source} />,
+        (props: PopupMenuProps) => <MediaSourceMenu {...props} {...params} />,
         target,
         x,
         y,
@@ -31,27 +40,41 @@ export async function showMediaSourceMenu(
     );
 }
 
-interface MediaSourceMenuProps {
-    source: MediaSource<any>;
-}
+export type MediaSourceMenuProps = Pick<
+    ShowMediaSourceMenuParams,
+    'source' | 'isSearch' | 'syntheticAlbumSource'
+>;
 
-function MediaSourceMenu({source, ...props}: PopupMenuProps & MediaSourceMenuProps) {
+function MediaSourceMenu({
+    source,
+    isSearch,
+    syntheticAlbumSource,
+    ...props
+}: PopupMenuProps & MediaSourceMenuProps) {
     return (
         <PopupMenu {...props}>
-            <MediaSourceMenuItems source={source} />
+            <MediaSourceMenuItems
+                source={source}
+                isSearch={isSearch}
+                syntheticAlbumSource={syntheticAlbumSource}
+            />
         </PopupMenu>
     );
 }
 
-export function MediaSourceMenuItems({source}: MediaSourceMenuProps) {
-    const primaryMenuItems = getMenuItems(source, 1, source.itemType);
+export function MediaSourceMenuItems({
+    source,
+    isSearch,
+    syntheticAlbumSource,
+}: MediaSourceMenuProps) {
+    const primaryMenuItems = getMenuItems(source, 1, source.itemType, isSearch);
     let secondaryMenuItems: MenuItems | undefined;
     let tertiaryMenuItems: MenuItems | undefined;
     if (source.secondaryItems?.layout?.view !== 'none' && source.itemType !== ItemType.Media) {
         const itemType = source.itemType === ItemType.Artist ? ItemType.Album : ItemType.Media;
         secondaryMenuItems = getMenuItems(source, 2, itemType);
         if (source.tertiaryItems?.layout?.view !== 'none' && source.itemType === ItemType.Artist) {
-            tertiaryMenuItems = getMenuItems(source, 3, ItemType.Media);
+            tertiaryMenuItems = getMenuItems(syntheticAlbumSource || source, 3, ItemType.Media);
         }
     }
     if (secondaryMenuItems) {
@@ -99,49 +122,57 @@ interface MenuItems {
     view?: React.ReactNode;
 }
 
-function getMenuItems(source: MediaSource<any>, level: 1 | 2 | 3, itemType: ItemType): MenuItems {
+function getMenuItems(
+    source: MediaSource<any>,
+    level: 1 | 2 | 3,
+    itemType: ItemType,
+    isSearch?: boolean
+): MenuItems {
     const id = `${source.sourceId || source.id}/${level}`;
     const items: MediaSourceItems | undefined =
         level === 3
             ? source.tertiaryItems
             : level === 2
-            ? source.secondaryItems
-            : source.primaryItems;
+              ? source.secondaryItems
+              : source.primaryItems;
     const menuItems: MenuItems = {
         label: items?.label || getDefaultLabel(source.id, itemType),
     };
-    if (items?.sort) {
+    if (items?.sort && !isSearch) {
         const sorting = getSourceSorting(id) || items.sort.defaultSort;
-        const sortOptions = items.sort.sortOptions;
-        menuItems.sort = (
-            <>
-                <PopupMenuItemGroup>
-                    {Object.keys(sortOptions).map((sortBy) => (
+        const sortOptions = items.sort.sortOptions || {};
+        const sortKeys = Object.keys(sortOptions);
+        if (sortKeys.length > 1) {
+            menuItems.sort = (
+                <>
+                    <PopupMenuItemGroup>
+                        {sortKeys.map((sortBy) => (
+                            <PopupMenuItemRadio
+                                label={`Sort by: ${sortOptions[sortBy]}`}
+                                checked={sorting.sortBy === sortBy}
+                                onClick={() => setSourceSorting(id, {...sorting, sortBy})}
+                                key={sortBy}
+                            />
+                        ))}
+                    </PopupMenuItemGroup>
+                    <PopupMenuSeparator />
+                    <PopupMenuItemGroup>
                         <PopupMenuItemRadio
-                            label={`Sort by: ${sortOptions[sortBy]}`}
-                            checked={sorting.sortBy === sortBy}
-                            onClick={() => setSourceSorting(id, sortBy, sorting.sortOrder)}
-                            key={sortBy}
+                            label="Sort Ascending"
+                            checked={sorting.sortOrder === 1}
+                            onClick={() => setSourceSorting(id, {...sorting, sortOrder: 1})}
+                            key="1"
                         />
-                    ))}
-                </PopupMenuItemGroup>
-                <PopupMenuSeparator />
-                <PopupMenuItemGroup>
-                    <PopupMenuItemRadio
-                        label="Sort Ascending"
-                        checked={sorting.sortOrder === 1}
-                        onClick={() => setSourceSorting(id, sorting.sortBy, 1)}
-                        key="1"
-                    />
-                    <PopupMenuItemRadio
-                        label="Sort Descending"
-                        checked={sorting.sortOrder === -1}
-                        onClick={() => setSourceSorting(id, sorting.sortBy, -1)}
-                        key="-1"
-                    />
-                </PopupMenuItemGroup>
-            </>
-        );
+                        <PopupMenuItemRadio
+                            label="Sort Descending"
+                            checked={sorting.sortOrder === -1}
+                            onClick={() => setSourceSorting(id, {...sorting, sortOrder: -1})}
+                            key="-1"
+                        />
+                    </PopupMenuItemGroup>
+                </>
+            );
+        }
     }
     const views = items?.layout?.views || ['card', 'card compact', 'card small', 'details'];
     const listView = document.getElementById(id);

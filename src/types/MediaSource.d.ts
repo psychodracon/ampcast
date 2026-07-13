@@ -70,30 +70,11 @@ export type MediaMultiSource<T extends MediaObject = MediaObject> = Pick<
     | 'disabled'
     | 'lockActionsStore'
     | 'Component'
-> & {isPin?: false} & (T extends MediaAlbum
-        ? {
-              readonly sources: readonly MediaSource<MediaAlbum>[];
-          }
-        : T extends MediaArtist
-        ? {
-              readonly sources: readonly MediaSource<MediaArtist>[];
-          }
-        : T extends MediaItem
-        ? {
-              readonly sources: readonly MediaSource<MediaItem>[];
-          }
-        : T extends MediaPlaylist
-        ? {
-              readonly sources: readonly MediaSource<MediaPlaylist>[];
-          }
-        : {
-              readonly sources: readonly (
-                  | MediaSource<MediaAlbum>
-                  | MediaSource<MediaArtist>
-                  | MediaSource<MediaItem>
-                  | MediaSource<MediaPlaylist>
-              )[];
-          });
+> & {
+    readonly itemType?: never;
+    readonly isPin?: false;
+    readonly sources: readonly MediaSource<T>[];
+};
 
 export type AnyMediaSource =
     | MediaSource<MediaAlbum>

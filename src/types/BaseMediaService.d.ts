@@ -13,7 +13,7 @@ import MediaObject from './MediaObject';
 import MediaPlaylist from './MediaPlaylist';
 import MediaService from './MediaService';
 import MediaSource, {AnyMediaSource} from './MediaSource';
-import PlayableItem from './PlayableItem';
+import Pager from './Pager';
 import PlaybackType from './PlaybackType';
 import Pin, {Pinnable} from './Pin';
 
@@ -33,6 +33,7 @@ type BaseMediaService = Auth & {
     readonly credentialsRequired?: boolean;
     readonly credentialsUrl?: string;
     readonly defaultNoScrobble?: boolean;
+    readonly lyricsDisabled?: boolean;
     readonly icons?: Partial<Record<LibraryAction, IconName>>;
     readonly labels?: Partial<Record<LibraryAction, string>>;
     readonly editablePlaylists?: MediaSource<MediaPlaylist>;
@@ -71,6 +72,7 @@ type BaseMediaService = Auth & {
         name: string,
         options?: CreatePlaylistOptions<T>
     ) => Promise<MediaPlaylist>;
+    createRadioPager?: (radio: MediaItem) => Pager<MediaItem>;
     createSourceFromPin?: <T extends Pinnable>(pin: Pin) => MediaSource<T>;
     deletePlaylist?: (playlist: MediaPlaylist) => Promise<void>;
     editPlaylist?: (playlist: MediaPlaylist) => Promise<MediaPlaylist>;
@@ -81,7 +83,7 @@ type BaseMediaService = Auth & {
     getFilters?: (filterType: FilterType, itemType: ItemType) => Promise<readonly MediaFilter[]>;
     getLyrics?: (item: MediaItem) => Promise<Lyrics | null>;
     getMediaObject?: <T extends MediaObject>(src: string) => Promise<T>;
-    getPlayableUrl?: (item: PlayableItem) => string;
+    getPlayableUrl?: (item: MediaItem) => string;
     getPlaybackType?: (item: MediaItem) => Promise<PlaybackType>;
     getPlaylistByName?: (name: string) => Promise<MediaPlaylist | undefined>;
     getThumbnailUrl?: (url: string) => string;

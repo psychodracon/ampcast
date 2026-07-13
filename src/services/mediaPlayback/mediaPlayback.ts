@@ -29,7 +29,7 @@ import Player from 'types/Player';
 import PlaybackType from 'types/PlaybackType';
 import PlaylistItem from 'types/PlaylistItem';
 import RepeatMode from 'types/RepeatMode';
-import {formatTime, isMiniPlayer, Logger} from 'utils';
+import {formatDuration, formatTime, isMiniPlayer, Logger} from 'utils';
 import {MAX_DURATION} from 'services/constants';
 import {createMediaItemFromUrl, dispatchMetadataChanges} from 'services/metadata';
 import lookup from 'services/lookup';
@@ -78,11 +78,6 @@ export function observePlaying(): Observable<void> {
     return observeActivePlayer().pipe(switchMap((player) => player.observePlaying()));
 }
 
-function appendTo(parentElement: HTMLElement): void {
-    mediaPlayer.appendTo(parentElement);
-    visualizerPlayer.appendTo(parentElement);
-}
-
 export function eject(): void {
     logger.log('eject');
     if (mediaPlayback.stopAfterCurrent) {
@@ -95,7 +90,7 @@ export function eject(): void {
 }
 
 export function load(item: PlaylistItem | null): void {
-    logger.log('load', item?.src);
+    logger.log('load', item?.src, item?.startTime || 0);
     if (miniPlayer.active) {
         miniPlayer.load(item);
     } else {
@@ -197,11 +192,18 @@ export function prev(): void {
     logger.log('prev');
     if (isMiniPlayer) {
         miniPlayerRemote.prev();
-    } else if (!playlist.atStart) {
+    } else if (
+        !playlist.atStart ||
+        (mediaPlayback.repeatMode === RepeatMode.All && !playlist.atEnd)
+    ) {
         mediaPlayback.stopAfterCurrent = false;
         currentNavigation = 'prev';
         lockLoading();
-        playlist.prev();
+        if (playlist.atStart) {
+            playlist.setCurrentIndex(playlist.size - 1);
+        } else {
+            playlist.prev();
+        }
     }
 }
 
@@ -209,11 +211,18 @@ export function next(): void {
     logger.log('next');
     if (isMiniPlayer) {
         miniPlayerRemote.next();
-    } else if (!playlist.atEnd) {
+    } else if (
+        !playlist.atEnd ||
+        (mediaPlayback.repeatMode === RepeatMode.All && !playlist.atStart)
+    ) {
         mediaPlayback.stopAfterCurrent = false;
         currentNavigation = 'next';
         lockLoading();
-        playlist.next();
+        if (playlist.atEnd) {
+            playlist.setCurrentIndex(0);
+        } else {
+            playlist.next();
+        }
     }
 }
 
@@ -384,7 +393,6 @@ const mediaPlayback: MediaPlayback = {
     observeEnded,
     observeError,
     observePlaying,
-    appendTo,
     eject,
     load,
     loadAndPlay,
@@ -532,11 +540,11 @@ if (!isMiniPlayer) {
                           filter(({currentItem}) => currentItem?.id === item.id),
                           map(({duration}) => duration),
                           distinctUntilChanged(),
-                          filter((duration) => !!duration && duration !== item.duration),
+                          filter((duration) => duration > 0 && duration !== item.duration),
                           take(2), // If the duration keeps changing then maybe it's not so reliable.
                           tap((duration) =>
                               dispatchMetadataChanges({
-                                  match: (object) => object.src === item.src,
+                                  match: (object) => (object as PlaylistItem).id === item.id,
                                   values: {duration},
                               })
                           )
@@ -630,7 +638,9 @@ playback
     .observePlaybackStart()
     .pipe(map((state) => state.currentItem?.src))
     .subscribe(logger.rx('playbackStart'));
-observeDuration().pipe(map(formatTime), distinctUntilChanged()).subscribe(logger.rx('duration'));
+observeDuration()
+    .pipe(map(formatDuration), distinctUntilChanged())
+    .subscribe(logger.rx('duration'));
 observeCurrentTime()
     .pipe(
         filter((time) => Math.floor(time) % 30 === 0),

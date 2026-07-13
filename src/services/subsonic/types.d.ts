@@ -81,11 +81,21 @@ declare namespace Subsonic {
         readonly track: number;
         readonly type: 'music';
         readonly year?: number;
-        // OpenSubsonic extensions
+        // OpenSubsonic extensions.
+        readonly albumArtist?: string;
+        readonly albumArtists?: readonly {
+            readonly id: string;
+            readonly name: string;
+        }[];
+        readonly bitDepth?: number;
+        readonly bpm?: number;
         readonly musicBrainzId?: string;
+        readonly isrc?: readonly string[];
         readonly replayGain?: {
             readonly albumGain: number;
+            readonly albumPeak: number;
             readonly trackGain: number;
+            readonly trackPeak: number;
         };
     }
 
@@ -166,6 +176,15 @@ declare namespace Subsonic {
     type DirectoryItem = Directory | MediaItem;
     type MediaObject = Album | Artist | Playlist | DirectoryItem | Radio;
 
+    interface ReportPlaybackParams {
+        readonly mediaId: string;
+        readonly mediaType: string;
+        readonly positionMs: number;
+        readonly state: 'starting' | 'playing' | 'paused' | 'stopped';
+        readonly playbackRate?: number;
+        readonly ignoreScrobble?: boolean;
+    }
+
     interface ScrobbleParams {
         readonly id: string;
         readonly time?: number;
@@ -184,10 +203,51 @@ declare namespace Subsonic {
         readonly url: string;
     }
 
-    interface PingResponse {
+    interface Lyrics {
+        readonly artist: string;
+        readonly title: string;
+        readonly value?: string;
+    }
+
+    interface LyricsList {
+        readonly structuredLyrics?: readonly StructuredLyrics[] | null;
+    }
+
+    interface StructuredLyrics {
+        readonly displayArtist: string;
+        readonly displayTitle: string;
+        readonly lang: string;
+        readonly offset: number;
+        readonly synced: boolean;
+        readonly line: readonly Line[];
+    }
+
+    interface Line {
+        readonly start: number;
+        readonly value: string;
+    }
+
+    interface Ping {
         readonly version: string;
         readonly openSubsonic?: boolean;
         readonly serverVersion?: string;
         readonly type?: string;
+    }
+
+    type OpenSubsonicExtensionName =
+        | 'apiKeyAuthentication'
+        | 'getPodcastEpisode'
+        | 'formPost'
+        | 'indexBasedQueue'
+        | 'playbackReport'
+        | 'songLyrics'
+        | 'sonicSimilarity'
+        | 'template'
+        | 'transcodeOffset'
+        | 'transcoding';
+
+    interface OpenSubsonicExtension {
+        readonly name: OpenSubsonicExtensionName;
+        readonly versions: readonly number[];
     }
 }

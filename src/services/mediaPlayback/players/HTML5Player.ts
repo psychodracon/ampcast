@@ -11,28 +11,29 @@ import {
     mergeMap,
     of,
     skipWhile,
-    startWith,
     switchMap,
     take,
     tap,
 } from 'rxjs';
 import LinearType from 'types/LinearType';
+import MediaItem from 'types/MediaItem';
+import MediaType from 'types/MediaType';
 import MediaService from 'types/MediaService';
-import PlayableItem from 'types/PlayableItem';
 import PlaylistItem from 'types/PlaylistItem';
 import Player from 'types/Player';
 import {Logger} from 'utils';
 import {MAX_DURATION} from 'services/constants';
-import {observeInternetRadioTrack} from 'services/internetRadio';
+import observeInternetRadioTrack from 'services/internetRadio/observeInternetRadioTrack';
 import {getServiceFromSrc, waitForLogin} from 'services/mediaServices';
 
-export default class HTML5Player implements Player<PlayableItem> {
+export default class HTML5Player implements Player<MediaItem> {
     protected readonly logger: Logger;
     protected readonly element = document.createElement(this.type);
     protected readonly paused$ = new BehaviorSubject(true);
     protected readonly playing$ = new Subject<void>();
-    protected readonly item$ = new BehaviorSubject<PlayableItem | null>(null);
-    protected readonly duration$ = new Subject<number>();
+    protected readonly item$ = new BehaviorSubject<MediaItem | null>(null);
+    protected readonly duration$ = new BehaviorSubject(0);
+    protected readonly currentTime$ = new Subject<number>();
     protected readonly error$ = new Subject<unknown>();
     protected hasWaited = false;
     protected loadedSrc = '';
@@ -43,22 +44,21 @@ export default class HTML5Player implements Player<PlayableItem> {
     #volume = 1;
 
     constructor(
-        readonly type: 'audio' | 'video',
+        protected readonly mediaType: MediaType,
         name: string,
         index?: 1 | 2
     ) {
-        this.logger = new Logger(`HTML5Player/${this.type}/${name}${index ? '-' + index : ''}`);
+        const type = this.type;
+        name = index ? `${name}-${index}` : name;
+        this.logger = new Logger(`HTML5Player/${type}/${name}`);
 
         const element = this.element;
+        element.className = `html5-${type}-${name} html5-${type}`;
         element.hidden = true;
-        element.muted = type === 'video';
+        element.muted = mediaType === MediaType.Video;
         element.volume = 1;
         element.autoplay = false;
         element.preload = 'metadata';
-        element.className = `html5-${type} html5-${type}-${name}`;
-        if (index) {
-            element.id = `html5-${type}-${name}-${index}`;
-        }
         element.crossOrigin = 'anonymous';
 
         // Load new items.
@@ -86,27 +86,31 @@ export default class HTML5Player implements Player<PlayableItem> {
             )
             .subscribe(this.logger);
 
-        // Maintain `duration`.
+        // Maintain `duration$`.
         this.observeItem()
             .pipe(
+                distinctUntilChanged((a, b) => a?.src === b?.src),
                 tap((item) => this.duration$.next(item?.duration || 0)),
-                switchMap(() =>
-                    fromEvent(this.element, 'durationchange').pipe(
-                        map(() => this.element.duration),
-                        map((duration) =>
-                            this.isInfiniteStream
-                                ? MAX_DURATION
-                                : isNaN(duration)
-                                  ? this.item?.duration || 0
-                                  : duration
-                        ),
-                        tap((duration) => this.duration$.next(duration))
-                    )
-                )
+                switchMap(() => fromEvent(this.element, 'durationchange')),
+                filter(() => !this.stopped),
+                map(() => this.duration),
+                tap((duration) => this.duration$.next(duration))
             )
             .subscribe(this.logger);
 
-        // Loop playback, using `element.loop` means we don't get an `ended` event.
+        // Maintain `currentTime$`.
+        this.observeItem()
+            .pipe(
+                distinctUntilChanged((a, b) => a?.src === b?.src),
+                tap((item) => this.currentTime$.next(item?.startTime || 0)),
+                switchMap(() => fromEvent(this.element, 'timeupdate')),
+                map(() => this.currentTime),
+                tap((currentTime) => this.currentTime$.next(currentTime))
+            )
+            .subscribe(this.logger);
+
+        // Loop playback.
+        // Using `element.loop` means we don't get an `ended` event.
         fromEvent(this.element, 'ended')
             .pipe(
                 filter(() => this.loop),
@@ -134,11 +138,23 @@ export default class HTML5Player implements Player<PlayableItem> {
     }
 
     get currentTime(): number {
-        return this.element.currentTime;
+        const currentTime = this.element.currentTime;
+        return this.stopped
+            ? 0
+            : isFinite(currentTime)
+              ? currentTime >= MAX_DURATION
+                  ? MAX_DURATION - Math.random() // Keep emitting.
+                  : currentTime
+              : 0;
     }
 
     get duration(): number {
-        return this.element.duration;
+        const duration = this.element.duration;
+        return this.isInfiniteStream
+            ? MAX_DURATION
+            : isNaN(duration)
+              ? this.item?.duration || 0
+              : duration;
     }
 
     get hidden(): boolean {
@@ -149,7 +165,7 @@ export default class HTML5Player implements Player<PlayableItem> {
         this.element.hidden = hidden;
     }
 
-    get item(): PlayableItem | null {
+    get item(): MediaItem | null {
         return this.item$.value;
     }
 
@@ -159,7 +175,7 @@ export default class HTML5Player implements Player<PlayableItem> {
 
     set muted(muted: boolean) {
         this.#muted = muted;
-        if (this.type === 'video') {
+        if (this.mediaType === MediaType.Video) {
             // Audio volume is handled by a `GainNode`.
             this.element.muted = muted;
         }
@@ -175,26 +191,14 @@ export default class HTML5Player implements Player<PlayableItem> {
 
     set volume(volume: number) {
         this.#volume = volume;
-        if (this.type === 'video') {
+        if (this.mediaType === MediaType.Video) {
             // Audio volume is handled by a `GainNode`.
             this.element.volume = volume;
         }
     }
 
     observeCurrentTime(): Observable<number> {
-        return fromEvent(this.element, 'timeupdate').pipe(
-            startWith(undefined),
-            map(() => this.element.currentTime),
-            map((currentTime) =>
-                this.stopped
-                    ? 0
-                    : isFinite(currentTime)
-                      ? currentTime >= MAX_DURATION
-                          ? MAX_DURATION - Math.random() // Keep emitting.
-                          : currentTime
-                      : 0
-            )
-        );
+        return this.currentTime$;
     }
 
     observeDuration(): Observable<number> {
@@ -241,8 +245,12 @@ export default class HTML5Player implements Player<PlayableItem> {
         parentElement.appendChild(this.element);
     }
 
-    load(item: PlayableItem): void {
-        this.logger.log('load', item.src);
+    canPlay(item: MediaItem): boolean {
+        return item.mediaType === this.mediaType;
+    }
+
+    load(item: MediaItem): void {
+        this.logger.log('load', item.src, item.startTime || 0);
         if (this.autoplay) {
             this.stopped = false;
         }
@@ -285,7 +293,7 @@ export default class HTML5Player implements Player<PlayableItem> {
     }
 
     resize(width: number, height: number): void {
-        if (this.type === 'video') {
+        if (this.mediaType === MediaType.Video) {
             this.element.style.width = `${width}px`;
             this.element.style.height = `${height}px`;
         }
@@ -300,11 +308,15 @@ export default class HTML5Player implements Player<PlayableItem> {
         );
     }
 
+    protected get type(): 'video' | 'audio' {
+        return this.mediaType === MediaType.Video ? 'video' : 'audio';
+    }
+
     protected get paused(): boolean {
         return this.paused$.value;
     }
 
-    protected observeItem(): Observable<PlayableItem | null> {
+    protected observeItem(): Observable<MediaItem | null> {
         return this.item$.pipe(distinctUntilChanged());
     }
 
@@ -326,7 +338,7 @@ export default class HTML5Player implements Player<PlayableItem> {
         }
     }
 
-    protected getMediaSrc(item: PlayableItem): string {
+    protected getMediaSrc(item: MediaItem): string {
         if (item.blobUrl) {
             return item.blobUrl;
         } else if (item.blob) {
@@ -341,7 +353,7 @@ export default class HTML5Player implements Player<PlayableItem> {
         return src;
     }
 
-    protected async loadAndPlay(item: PlayableItem): Promise<void> {
+    protected async loadAndPlay(item: MediaItem): Promise<void> {
         const mediaSrc = this.getMediaSrc(item);
         const currentSrc = this.element.getAttribute('src');
         if (currentSrc !== mediaSrc) {
@@ -388,7 +400,7 @@ export default class HTML5Player implements Player<PlayableItem> {
         }
     }
 
-    protected async safeReload(item: PlayableItem): Promise<void> {
+    protected async safeReload(item: MediaItem): Promise<void> {
         this.element.currentTime = item.startTime || 0;
         if (this.autoplay) {
             await this.safePlay();

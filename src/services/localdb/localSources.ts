@@ -1,19 +1,22 @@
 import {distinctUntilChanged, map} from 'rxjs';
 import MiniSearch from 'minisearch';
 import ItemType from 'types/ItemType';
+import Listen from 'types/Listen';
 import MediaItem from 'types/MediaItem';
 import MediaListLayout from 'types/MediaListLayout';
-import MediaListSort from 'types/MediaListSort';
 import MediaPlaylist from 'types/MediaPlaylist';
-import MediaServiceId from 'types/MediaServiceId';
-import MediaSource, {AnyMediaSource, MediaSourceItems} from 'types/MediaSource';
+import MediaServiceId, {ScrobblerId} from 'types/MediaServiceId';
+import MediaSource, {AnyMediaSource, MediaMultiSource, MediaSourceItems} from 'types/MediaSource';
 import Pager from 'types/Pager';
 import {observePlaybackState} from 'services/mediaPlayback/playback';
+import {localeCompare} from 'services/metadata';
 import ObservablePager from 'services/pagers/ObservablePager';
 import WrappedPager from 'services/pagers/WrappedPager';
 import {recentlyPlayedTracksLayout} from 'components/MediaList/layouts';
-import {observeListens} from './listens';
+import {localPlaylistItemsSort, localPlaylistsSort} from './localSorting';
+import {isRecentListen, observeListens} from './listens';
 import playlists, {LocalPlaylistItem} from './playlists';
+import UnscrobbledBrowser from './components/UnscrobbledBrowser';
 
 const serviceId: MediaServiceId = 'localdb';
 
@@ -24,18 +27,6 @@ export const localPlaylistLayout: Partial<MediaListLayout> = {
         data: 'TrackCount',
     },
     details: ['Name', 'Description', 'TrackCount'],
-};
-
-export const localPlaylistItemsSort: MediaListSort = {
-    sortOptions: {
-        position: 'Position',
-        title: 'Title',
-        artist: 'Artist',
-    },
-    defaultSort: {
-        sortBy: 'position',
-        sortOrder: 1,
-    },
 };
 
 export const localPlaylistItems: MediaSourceItems<LocalPlaylistItem> = {
@@ -55,7 +46,7 @@ export const localPlaylistItems: MediaSourceItems<LocalPlaylistItem> = {
 export const localScrobbles: MediaSource<MediaItem> = {
     id: `${serviceId}/scrobbles`,
     title: 'Scrobbles',
-    icon: 'clock',
+    icon: 'search',
     itemType: ItemType.Media,
     searchable: true,
     searchPlaceholder: 'Search playback history',
@@ -119,16 +110,7 @@ export const localPlaylists: MediaSource<MediaPlaylist> = {
     itemType: ItemType.Playlist,
     primaryItems: {
         layout: localPlaylistLayout,
-        sort: {
-            sortOptions: {
-                title: 'Name',
-                modifiedAt: 'Date Modified',
-            },
-            defaultSort: {
-                sortBy: 'modifiedAt',
-                sortOrder: -1,
-            },
-        },
+        sort: localPlaylistsSort,
     },
     secondaryItems: localPlaylistItems,
 
@@ -140,11 +122,8 @@ export const localPlaylists: MediaSource<MediaPlaylist> = {
             {
                 sort: (a, b) => {
                     switch (sortBy) {
-                        case 'title':
-                            return (
-                                a.title.localeCompare(b.title, undefined, {sensitivity: 'base'}) *
-                                sortOrder
-                            );
+                        case 'Name':
+                            return localeCompare(a.title, b.title) * sortOrder;
 
                         default:
                             return ((a.modifiedAt || 0) - (b.modifiedAt || 0)) * sortOrder;
@@ -159,9 +138,59 @@ export const localPlaylists: MediaSource<MediaPlaylist> = {
     },
 };
 
-const localSources: readonly AnyMediaSource[] = [localPlaylists];
+const unscrobbled: MediaMultiSource = {
+    id: `${serviceId}/unscrobbled`,
+    title: 'Unscrobbled',
+    icon: 'scrobble',
+    defaultHidden: true,
+    Component: UnscrobbledBrowser as any,
+    sources: [
+        createUnscrobbled('lastfm', 'last.fm'),
+        createUnscrobbled('listenbrainz', 'ListenBrainz'),
+    ],
+};
+
+const localSources: readonly AnyMediaSource[] = [localPlaylists, unscrobbled];
 
 export default localSources;
+
+function createUnscrobbled(scrobblerId: ScrobblerId, title: string): MediaSource<MediaItem> {
+    return {
+        id: `${serviceId}/${scrobblerId}/unscrobbled`,
+        sourceId: `${serviceId}/unscrobbled`,
+        title,
+        icon: 'scrobble',
+        itemType: ItemType.Media,
+        primaryItems: {
+            layout: {
+                view: 'details',
+                details: [
+                    'ListenDate',
+                    'ScrobbleStatus',
+                    'IconTitle',
+                    'Artist',
+                    'Album',
+                    'Duration',
+                ],
+                views: [],
+            },
+            itemKey: 'playedAt',
+            emptyMessage: 'No unscrobbled tracks',
+        },
+
+        search(): Pager<Listen> {
+            const scrobbledAt = `${scrobblerId}ScrobbledAt` as keyof Listen;
+            return new ObservablePager(
+                observeListens().pipe(
+                    map((listens) =>
+                        listens.filter((listen) => !listen[scrobbledAt] && isRecentListen(listen))
+                    )
+                ),
+                {passive: true}
+            );
+        },
+    };
+}
 
 function addIconToLayout(layout: MediaListLayout): MediaListLayout {
     return {

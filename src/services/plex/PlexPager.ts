@@ -1,4 +1,5 @@
 import {BehaviorSubject, debounceTime, filter, map, mergeMap, switchMap, tap} from 'rxjs';
+import ItemType from 'types/ItemType';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
@@ -11,7 +12,7 @@ import IndexedPager from 'services/pagers/IndexedPager';
 import {getSourceSorting} from 'services/mediaServices/servicesSettings';
 import plexApi, {PlexRequest} from './plexApi';
 import plexSettings from './plexSettings';
-import {createMediaObjects, getMediaAlbums, getMetadata} from './plexUtils';
+import {createMediaObjects, createPlaylistItems, getMediaAlbums, getMetadata} from './plexUtils';
 
 export default class PlexPager<T extends MediaObject> extends IndexedPager<T> {
     constructor(
@@ -22,21 +23,26 @@ export default class PlexPager<T extends MediaObject> extends IndexedPager<T> {
     ) {
         super(
             async (pageNumber, pageSize) => {
-                const page = await plexApi.getPage(
-                    request,
-                    (pageNumber - 1) * pageSize,
-                    pageSize
-                );
+                const offset = (pageNumber - 1) * pageSize;
+                const page = await plexApi.getPage(request, offset, pageSize);
                 const [plexItems, albums] = await Promise.all([
                     getMetadata(page.items),
                     getMediaAlbums(page.items),
                 ]);
-                const items = createMediaObjects<T>(
-                    plexItems,
-                    parent,
-                    albums,
-                    getSourceSorting(this.childSortId) || options?.childSort
-                );
+                const items =
+                    parent?.itemType === ItemType.Playlist
+                        ? (createPlaylistItems(
+                              plexItems as plex.Track[],
+                              parent,
+                              albums,
+                              offset
+                          ) as T[])
+                        : createMediaObjects<T>(
+                              plexItems,
+                              parent,
+                              albums,
+                              getSourceSorting(this.childSortId) || options?.childSort
+                          );
                 return {items, total: page.total};
             },
             {
@@ -59,7 +65,7 @@ export class PlexPlaylistItemsPager extends PlexPager<MediaItem> {
         private readonly playlist: MediaPlaylist,
         request: PlexRequest
     ) {
-        super(request, {autofill: true, pageSize: 1000});
+        super(request, {autofill: true, pageSize: 1000}, playlist);
     }
 
     // (add|move|remove)Items will only be called if the playlist is complete.
@@ -118,9 +124,12 @@ export class PlexPlaylistItemsPager extends PlexPager<MediaItem> {
         if (atIndex >= 0 && atIndex < items.length) {
             // insert
             items.splice(atIndex, 0, ...additions);
+            this.synchPositions(items);
         } else {
             // append
-            items.push(...additions);
+            additions.forEach((item) => {
+                items.push({...item, position: items.length + 1});
+            });
         }
         this.size = items.length;
         this.items = items;
@@ -131,6 +140,7 @@ export class PlexPlaylistItemsPager extends PlexPager<MediaItem> {
         this.busy = true;
         try {
             this.error = undefined;
+            this.synchPositions(this.items);
             await plexApi.clearPlaylist(this.playlist);
             await plexApi.addToPlaylist(this.playlist, this.items);
             this.synch$.next(false);
@@ -139,6 +149,10 @@ export class PlexPlaylistItemsPager extends PlexPager<MediaItem> {
             this.error = err;
         }
         this.busy = false;
+    }
+
+    private synchPositions(items: readonly MediaItem[]): void {
+        items.forEach((item, index) => ((item as any).position = index + 1));
     }
 
     private updateTrackCount(): void {

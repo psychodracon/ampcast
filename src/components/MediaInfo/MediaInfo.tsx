@@ -9,6 +9,7 @@ import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import PlaylistItem from 'types/PlaylistItem';
+import {isListen} from 'services/localdb/listens';
 import {getService} from 'services/mediaServices';
 import DefaultActions, {ActionsProps} from 'components/Actions';
 import Badges from 'components/Badges';
@@ -49,7 +50,7 @@ export default function MediaInfo<T extends MediaObject>({
 
 function MediaItemInfo({
     item,
-    scrobblingOptions = item.linearType === LinearType.Station,
+    scrobblingOptions = item.linearType === LinearType.Station && !isListen(item),
 }: MediaInfoProps<MediaItem>) {
     return (
         <article className="media-info">
@@ -169,7 +170,7 @@ function Description<T extends MediaPlaylist>({description}: Pick<T, 'descriptio
 function Duration<T extends MediaItem>({duration}: Pick<T, 'duration'>) {
     return (
         <p className="duration">
-            <Time className="text" time={duration || 0} />
+            <Time className="text" time={duration} asDuration />
         </p>
     );
 }
@@ -360,6 +361,6 @@ function Actions({item}: ActionsProps) {
     return <DefaultActions item={item} inInfoView />;
 }
 
-function isPlaylistItem(item: MediaObject): item is PlaylistItem {
-    return item.itemType === ItemType.Media && 'id' in item;
+function isPlaylistItem(item: MediaItem): item is PlaylistItem {
+    return 'id' in item;
 }

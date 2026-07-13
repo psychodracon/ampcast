@@ -1,8 +1,10 @@
 @use 'styles/effects.scss';
 
 .visualizer-coverart {
+    font-family: var(--font-family, var(--system-font-family));
     text-rendering: optimizeLegibility;
     font-size: 1.25em;
+    overflow: hidden;
 
     .media.fullscreen & {
         font-size: 1.375em;
@@ -17,6 +19,17 @@
 
         .currently-playing-thumbnail {
             width: calc(var(--thumbnail-width) + 2em);
+        }
+
+        .currently-playing-text {
+            height: calc(100% - 0.5em);
+            width: 100%;
+        }
+
+        &.beats-enabled {
+            .currently-playing-text {
+                height: calc(100% - 3.5em);
+            }
         }
 
         .sub-title {
@@ -39,6 +52,13 @@
         .currently-playing-text {
             padding: 0 1em;
             text-align: center;
+            height: calc(100% - var(--thumbnail-size) - 2.5em);
+        }
+
+        &.beats-enabled {
+            .currently-playing-text {
+                height: calc(100% - var(--thumbnail-size) - 5.5em);
+            }
         }
 
         .sub-title {
@@ -65,6 +85,7 @@
         color: var(--text-color);
         background-color: var(--background-color);
         transition: opacity 2s linear 1s;
+        overflow: hidden;
 
         .media.paused & {
             transition: none;
@@ -109,39 +130,41 @@
         }
 
         &-text {
-            position: relative;
-            /* break inherited opacity */
+            position: relative; /* break inherited opacity */
             padding: 1em 1em 1em 0.5em;
             font-weight: bold;
             overflow-wrap: anywhere;
             hyphens: auto;
+            display: flex;
+            flex-direction: column;
+
+            .metadata {
+                flex: initial;
+            }
+
+            .synchronized-lyrics {
+                flex: auto;
+            }
         }
 
-        &.text-light {
+        &.dark.text-light {
+            --shadow-depth: max(1px, 0.0625em);
+            --shadow: var(--shadow-depth) var(--shadow-depth) 0 rgba(16, 16, 16, 0.9);
+
             .currently-playing-text {
-                text-shadow: 2px 2px 0 rgba(16, 16, 16, 0.8);
+                text-shadow: var(--shadow);
 
                 .icon {
-                    filter: drop-shadow(2px 2px 0 rgba(16, 16, 16, 0.4));
-                }
-
-                .media:fullscreen & {
-                    text-shadow: 4px 4px 0 rgba(16, 16, 16, 0.6);
-
-                    .icon {
-                        filter: drop-shadow(4px 4px 0 rgba(16, 16, 16, 0.4));
-                    }
+                    filter: drop-shadow(var(--shadow));
                 }
             }
 
             .provided-by .text {
                 color: white;
                 opacity: 0.75;
-                text-shadow: 1px 1px 0 rgba(16, 16, 16, 0.6);
 
                 .media:fullscreen & {
                     opacity: 0.5;
-                    text-shadow: 2px 2px 0 rgba(16, 16, 16, 0.6);
                 }
             }
         }
@@ -178,8 +201,7 @@
         }
 
         .provided-by {
-            position: relative;
-            /* break inherited opacity */
+            position: relative; /* break inherited opacity */
             font-size: max(0.5em, 11px);
             margin-top: 0.5em;
             align-items: flex-start;
@@ -202,7 +224,7 @@
         .title {
             @include effects.line-clamp(3);
             font-size: max(1em, 10px);
-            line-height: 1.2;
+            line-height: 1.25;
         }
 
         .sub-title {
@@ -218,7 +240,7 @@
         h5.sub-title {
             margin-top: 0.875em;
             margin-left: 0.25em;
-            font-size: max(0.5em, 8px);
+            font-size: max(0.5em, 9px);
 
             .text {
                 margin-left: 0.375em;

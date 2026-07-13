@@ -1,14 +1,15 @@
-import React, {useCallback, useEffect, useId, useReducer, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useId, useMemo, useReducer, useRef, useState} from 'react';
 import {interval} from 'rxjs';
 import {Except} from 'type-fest';
 import Action from 'types/Action';
 import ItemType from 'types/ItemType';
-import MediaItem from 'types/MediaItem';
 import MediaListLayout, {Field} from 'types/MediaListLayout';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaSource, {MediaSourceItems} from 'types/MediaSource';
 import Pager from 'types/Pager';
+import ParentOf from 'types/ParentOf';
+import SortParams from 'types/SortParams';
 import {setSourceFields} from 'services/mediaServices/servicesSettings';
 import {ActionsProps, performAction, showActionsMenu} from 'components/Actions';
 import ErrorBox, {ErrorBoxProps} from 'components/Errors/ErrorBox';
@@ -20,6 +21,7 @@ import usePreferences from 'hooks/usePreferences';
 import MediaListStatusBar from './MediaListStatusBar';
 import useMediaListLayout from './useMediaListLayout';
 import useOnDragStart from './useOnDragStart';
+import useMediaListSort from './useMediaListSort';
 import useViewClassName from './useViewClassName';
 import './MediaList.scss';
 
@@ -31,12 +33,20 @@ const defaultMediaListLayout: MediaListLayout = {
 
 export interface MediaListProps<T extends MediaObject> extends Except<
     ListViewProps<T>,
-    'items' | 'itemKey' | 'itemClassName' | 'layout' | 'storageId'
+    | 'items'
+    | 'itemKey'
+    | 'itemClassName'
+    | 'layout'
+    | 'sortable'
+    | 'sortParams'
+    | 'savedSortParams'
+    | 'storageId'
 > {
     source?: MediaSource<any>;
+    isSearchResult?: boolean;
     level?: 1 | 2 | 3;
     pager: Pager<T> | null;
-    parentPlaylist?: T extends MediaItem ? MediaPlaylist : never;
+    parent?: ParentOf<T>;
     defaultLayout?: MediaListLayout;
     statusBar?: boolean;
     statusBarIcons?: readonly React.ReactNode[];
@@ -44,19 +54,21 @@ export interface MediaListProps<T extends MediaObject> extends Except<
     emptyMessage?: string;
     onError?: (error: unknown) => void;
     onLoad?: () => void;
+    onInternalSort?: (params: SortParams) => void;
     Actions?: React.FC<ActionsProps>;
     Error?: React.FC<ErrorBoxProps>;
 }
 
 export default function MediaList<T extends MediaObject>({
     source,
+    isSearchResult = false,
     level = 1,
     className = '',
     defaultLayout = defaultMediaListLayout,
     draggable = false,
     reorderable = true,
     pager = null,
-    parentPlaylist,
+    parent,
     statusBar = true,
     statusBarIcons,
     loadingText,
@@ -65,6 +77,7 @@ export default function MediaList<T extends MediaObject>({
     onDoubleClick,
     onEnter,
     onError,
+    onInternalSort,
     onLoad,
     onSelect,
     Actions,
@@ -77,10 +90,11 @@ export default function MediaList<T extends MediaObject>({
     const containerRef = useRef<HTMLDivElement | null>(null);
     const sourceItems = getSourceItems(source, level); // view config
     const {itemKey = 'src', layout: layoutOptions} = sourceItems;
+    const parentPlaylist = isPlaylist(parent) ? parent : undefined;
     const layout = useMediaListLayout(id, defaultLayout, layoutOptions, Actions, parentPlaylist);
     const [scrollIndex, setScrollIndex] = useState(0);
     const [pageSize, setPageSize] = useState(0);
-    const [{items, loaded, busy, error, size, maxSize}, fetchAt] = usePager(pager);
+    const [{items, loaded, busy, complete, error, size, maxSize}, fetchAt] = usePager(pager);
     const empty = items.length === 0;
     const initialError = useFirstValue(empty ? error : null);
     const success = loaded && !initialError;
@@ -90,14 +104,29 @@ export default function MediaList<T extends MediaObject>({
     const playingSrc = playingItem?.src;
     const playingCatalogId = playingItem?.apple?.catalogId;
     const viewClassName = useViewClassName(layout);
-    const {disableExplicitContent} = usePreferences();
+    const {disableExplicitContent, doubleClickBehavior} = usePreferences();
     const onDragStart = useOnDragStart(selectedItems);
-
-    emptyMessage = emptyMessage || sourceItems?.emptyMessage;
+    const sortable = useMemo(
+        () =>
+            complete
+                ? layout.cols.filter((col) => !col.unsortable).map((col) => col.id!)
+                : isSearchResult
+                  ? []
+                  : Object.keys(sourceItems.sort?.sortOptions || {}),
+        [complete, sourceItems, layout, isSearchResult]
+    );
+    const {sortedItems, sortParams, savedSortParams, onSort} = useMediaListSort(
+        id,
+        items,
+        isSearchResult,
+        sourceItems,
+        complete,
+        onInternalSort
+    );
 
     useEffect(() => {
         // Make sure `LastPlayed` fields etc are updated.
-        const subscription = interval(60_000).subscribe(forceUpdate);
+        const subscription = interval(30_000).subscribe(forceUpdate);
         return () => subscription.unsubscribe();
     }, []);
 
@@ -122,6 +151,7 @@ export default function MediaList<T extends MediaObject>({
         if (scrollIndex >= 0 && pageSize > 0) {
             fetchAt(scrollIndex, pageSize);
         }
+        // Re-fetch if the pager changes.
     }, [fetchAt, scrollIndex, pageSize, pager]);
 
     const isPlayable = useCallback(
@@ -170,12 +200,12 @@ export default function MediaList<T extends MediaObject>({
     const handleDoubleClick = useCallback(
         (item: T, rowIndex: number) => {
             if (isPlayable(item)) {
-                performAction(Action.Queue, [item]);
+                performAction(doubleClickBehavior, [item]);
             } else {
                 onDoubleClick?.(item, rowIndex);
             }
         },
-        [onDoubleClick, isPlayable]
+        [onDoubleClick, isPlayable, doubleClickBehavior]
     );
 
     const handleEnter = useCallback(
@@ -199,7 +229,7 @@ export default function MediaList<T extends MediaObject>({
         performAction(Action.Info, items);
     }, []);
 
-    const handleReorder = useCallback(
+    const handleReorderCols = useCallback(
         (col: Column<any>, toIndex: number) => {
             const fields = layout.cols.map((col) => col.id);
             const insertBeforeField = fields[toIndex];
@@ -254,20 +284,26 @@ export default function MediaList<T extends MediaObject>({
                     {...props}
                     className="media-list"
                     layout={layout}
-                    items={items}
+                    items={sortedItems}
                     itemClassName={itemClassName}
                     itemKey={itemKey as any}
-                    emptyMessage={loaded && empty ? emptyMessage : ''}
+                    emptyMessage={
+                        loaded && empty ? emptyMessage || sourceItems?.emptyMessage : undefined
+                    }
                     draggable={draggable}
                     reorderable={reorderable}
+                    sortable={sortable}
+                    sortParams={sortParams}
+                    savedSortParams={savedSortParams}
                     storageId={id}
                     onContextMenu={onContextMenu || handleContextMenu}
                     onDoubleClick={handleDoubleClick}
                     onEnter={handleEnter}
                     onInfo={handleInfo}
                     onPageSizeChange={setPageSize}
-                    onReorder={handleReorder}
+                    onReorderCols={handleReorderCols}
                     onScrollIndexChange={setScrollIndex}
+                    onSort={onSort}
                     onSelect={handleSelect}
                 />
             )}
@@ -299,4 +335,8 @@ function getSourceItems<T extends MediaObject>(
               ? source?.secondaryItems
               : source?.primaryItems;
     return sourceItems || {};
+}
+
+function isPlaylist(item?: MediaObject): item is MediaPlaylist {
+    return item?.itemType === ItemType.Playlist;
 }

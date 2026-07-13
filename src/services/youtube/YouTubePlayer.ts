@@ -22,7 +22,7 @@ import {
     timer,
 } from 'rxjs';
 import YouTubeFactory from 'youtube-player';
-import PlayableItem from 'types/PlayableItem';
+import MediaItem from 'types/MediaItem';
 import Player from 'types/Player';
 import {Logger} from 'utils';
 import youtubeApi from './youtubeApi';
@@ -39,7 +39,6 @@ const compareSize = (a: Size, b: Size) => a.width === b.width && a.height === b.
 const defaultAspectRatio = 16 / 9;
 
 const playerVars: YT.PlayerVars = {
-    autohide: 1,
     autoplay: 0,
     controls: 0,
     disablekb: 1,
@@ -47,19 +46,19 @@ const playerVars: YT.PlayerVars = {
     origin: location.origin,
     fs: 0,
     iv_load_policy: 3,
-    modestbranding: 1, // deprecated
     rel: 0,
-    showinfo: 0,
 };
 
-export default class YouTubePlayer implements Player<PlayableItem> {
+export default class YouTubePlayer implements Player<MediaItem> {
     static readonly host = host;
     static readonly playerVars = playerVars;
     private readonly logger: Logger;
     private readonly player: YT.Player | null = null;
     private Player: ReturnType<typeof YouTubeFactory> | null = null;
-    private readonly item$ = new BehaviorSubject<PlayableItem | null>(null);
+    private readonly item$ = new BehaviorSubject<MediaItem | null>(null);
     private readonly paused$ = new BehaviorSubject(true);
+    private readonly duration$ = new BehaviorSubject(0);
+    private readonly currentTime$ = new Subject<number>();
     private readonly size$ = new BehaviorSubject<Size>({width: 0, height: 0});
     private readonly error$ = new Subject<unknown>();
     private readonly playerLoaded$ = new BehaviorSubject(false);
@@ -82,8 +81,8 @@ export default class YouTubePlayer implements Player<PlayableItem> {
 
         this.targetId = `youtube-iframe-${id}`;
 
-        element.hidden = true;
         element.className = 'youtube-video';
+        element.hidden = true;
         wrapper.className = 'youtube-video-wrapper';
         target.id = this.targetId;
         wrapper.append(target);
@@ -132,6 +131,41 @@ export default class YouTubePlayer implements Player<PlayableItem> {
                 tap(() => (this.element.style.visibility = ''))
             )
             .subscribe(logger);
+
+        // Maintain `duration$`.
+        this.observeItem()
+            .pipe(
+                distinctUntilChanged((a, b) => a?.src === b?.src),
+                tap((item) => this.duration$.next(item?.duration || 0)),
+                switchMap(() => this.observeState()),
+                map(() => this.player?.getDuration() || 0),
+                distinctUntilChanged(),
+                filter((duration) => duration !== 0),
+                tap((duration) => this.duration$.next(duration))
+            )
+            .subscribe(this.logger);
+
+        // Maintain `currentTime$`.
+        this.observeItem()
+            .pipe(
+                distinctUntilChanged((a, b) => a?.src === b?.src),
+                tap((item) => this.currentTime$.next(item?.startTime || 0)),
+                switchMap(() => this.observeState()),
+                switchMap((state) =>
+                    state === YT.PlayerState.PLAYING
+                        ? timer(
+                              250 - (Math.round(this.player!.getCurrentTime() * 1000) % 250),
+                              250
+                          ).pipe(
+                              map(() => this.player!.getCurrentTime()),
+                              takeUntil(this.observeState())
+                          )
+                        : EMPTY
+                ),
+                distinctUntilChanged(),
+                tap((currentTime) => this.currentTime$.next(currentTime))
+            )
+            .subscribe(this.logger);
 
         // The video might get paused if the tab is hidden/minimized.
         fromEvent(document, 'visibilitychange')
@@ -191,27 +225,11 @@ export default class YouTubePlayer implements Player<PlayableItem> {
     }
 
     observeCurrentTime(): Observable<number> {
-        return this.observeState().pipe(
-            switchMap((state) =>
-                state === YT.PlayerState.PLAYING
-                    ? timer(
-                          250 - (Math.round(this.player!.getCurrentTime() * 1000) % 250),
-                          250
-                      ).pipe(
-                          map(() => this.player!.getCurrentTime()),
-                          takeUntil(this.observeState())
-                      )
-                    : EMPTY
-            )
-        );
+        return this.currentTime$;
     }
 
     observeDuration(): Observable<number> {
-        return this.observeState().pipe(
-            map(() => this.player?.getDuration() || 0),
-            filter((duration) => duration !== 0),
-            distinctUntilChanged()
-        );
+        return this.duration$;
     }
 
     observeEnded(): Observable<void> {
@@ -240,8 +258,12 @@ export default class YouTubePlayer implements Player<PlayableItem> {
         parentElement.appendChild(this.element);
     }
 
-    load(item: PlayableItem): void {
-        this.logger.log('load', item.src);
+    canPlay(item: MediaItem): boolean {
+        return item.src.startsWith('youtube:');
+    }
+
+    load(item: MediaItem): void {
+        this.logger.log('load', item.src, item.startTime || 0);
         this.item$.next(item);
         this.paused$.next(!this.autoplay);
         if (item.src === this.loadedSrc) {
@@ -292,7 +314,7 @@ export default class YouTubePlayer implements Player<PlayableItem> {
         this.element.remove();
     }
 
-    private get item(): PlayableItem | null {
+    private get item(): MediaItem | null {
         return this.item$.value;
     }
 
@@ -304,7 +326,7 @@ export default class YouTubePlayer implements Player<PlayableItem> {
         return this.item?.src;
     }
 
-    private observeItem(): Observable<PlayableItem | null> {
+    private observeItem(): Observable<MediaItem | null> {
         return this.item$.pipe(distinctUntilChanged());
     }
 
@@ -353,7 +375,7 @@ export default class YouTubePlayer implements Player<PlayableItem> {
         }
     }
 
-    private async loadAndPlay(item: PlayableItem): Promise<void> {
+    private async loadAndPlay(item: MediaItem): Promise<void> {
         if (this.paused) {
             return;
         }

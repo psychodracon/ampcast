@@ -54,6 +54,7 @@ const spotify: PublicMediaService = {
     credentialsUrl: 'https://developer.spotify.com/dashboard',
     serviceType: ServiceType.PublicMedia,
     Components: {Credentials, Login},
+    lyricsDisabled: true,
     internetRequired: true,
     secureContextRequired: true,
     credentialsRequired: true,
@@ -106,10 +107,11 @@ function canPin(item: MediaObject): boolean {
 }
 
 function canStore<T extends MediaObject>(item: T, inListView?: boolean): boolean {
+    if (item.synthetic) {
+        return false;
+    }
     switch (item.itemType) {
         case ItemType.Album:
-            return !item.synthetic;
-
         case ItemType.Artist:
         case ItemType.Media:
             return true;

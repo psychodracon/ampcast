@@ -54,6 +54,7 @@ const apple: PublicMediaService = {
         return appleSettings.credentialsLocked;
     },
     credentialsRequired: true,
+    lyricsDisabled: true,
     root: appleSearch,
     sources: appleSources,
     icons: {
@@ -62,7 +63,7 @@ const apple: PublicMediaService = {
     },
     labels: {
         [Action.AddToLibrary]: 'Add to Apple Music Library',
-        [Action.RemoveFromLibrary]: 'Saved to Apple Music Library',
+        [Action.RemoveFromLibrary]: 'Remove from Apple Music Library',
     },
     editablePlaylists: appleEditablePlaylists,
     addMetadata,
@@ -139,15 +140,16 @@ function canPin(item: MediaObject): boolean {
 }
 
 function canStore<T extends MediaObject>(item: T): boolean {
+    if (item.synthetic) {
+        return false;
+    }
     switch (item.itemType) {
         case ItemType.Media:
             return item.linearType !== LinearType.Station;
 
+        case ItemType.Album:
         case ItemType.Playlist:
             return true;
-
-        case ItemType.Album:
-            return !item.synthetic;
 
         default:
             return false;

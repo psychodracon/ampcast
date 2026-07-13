@@ -57,9 +57,9 @@ module.exports = (args) => {
         mode,
         entry: {
             'lib/music-metadata': 'music-metadata',
-            // 'lib/tidal-player': '@tidal-music/player',
             'lib/unidecode': 'unidecode',
             'lib/vendors': [
+                '@ctrl/tinycolor',
                 'colorjs.io',
                 'colorthief',
                 'd3-array',
@@ -68,17 +68,19 @@ module.exports = (args) => {
                 'detect-browser',
                 'dexie',
                 'jsfft',
+                'icecast-metadata-js/src/IcecastReadableStream',
                 'is-electron',
                 'md5',
                 'minisearch',
+                'nanoid',
                 'react',
-                'react-dom',
+                'react-dom/client',
                 'react-error-boundary',
+                'rxjs',
+                'semver/functions/coerce',
+                'semver/functions/gte',
                 'string-score',
                 'youtube-player',
-                // These are always included in `bundle.js`. Tree-shaking?
-                // '@ctrl/tinycolor',
-                // 'rxjs',
             ],
             bundle: {
                 import: './src/index.tsx',
@@ -116,12 +118,6 @@ module.exports = (args) => {
                         chunks: 'all',
                         enforce: true,
                     },
-                    // 'lib/tidal-player': {
-                    //     name: 'lib/tidal-player',
-                    //     test: /[\\/]node_modules[\\/](@tidal\-music[\\/]player)[\\/]/,
-                    //     chunks: 'all',
-                    //     enforce: true,
-                    // },
                 },
             },
         },
@@ -209,10 +205,6 @@ module.exports = (args) => {
                 ? undefined
                 : new CopyPlugin({
                       patterns: [
-                          {
-                              from: './src/service-worker.js',
-                              to: wwwDir,
-                          },
                           {
                               from: './src/service-worker-v2.js',
                               to: wwwDir,

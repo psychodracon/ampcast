@@ -8,7 +8,6 @@ import MediaFolder from 'types/MediaFolder';
 import MediaFolderItem from 'types/MediaFolderItem';
 import MediaItem from 'types/MediaItem';
 import MediaListLayout from 'types/MediaListLayout';
-import MediaListSort from 'types/MediaListSort';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
@@ -24,53 +23,26 @@ import WrappedPager from 'services/pagers/WrappedPager';
 import EmbyPager from './EmbyPager';
 import EmbyRecentlyPlayedPager from './EmbyRecentlyPlayedPager';
 import embySettings from './embySettings';
-import FolderBrowser from 'components/MediaBrowser/FolderBrowser';
 import {
     mostPlayedTracksLayout,
     recentlyAddedAlbumsLayout,
     recentlyPlayedTracksLayout,
 } from 'components/MediaList/layouts';
-import {createArtistAlbumsPager, createPlaylistItemsPager, getSortParams} from './embyUtils';
+import {
+    embyAlbumsSort,
+    embyAlbumsSortMap,
+    embyArtistAlbumsSort,
+    embyPlaylistItemsSort,
+    embyPlaylistsSortMap,
+    embySongsSort,
+    embySongsSortMap,
+    getSortParams,
+} from './embySorting';
+import {createArtistAlbumsPager, createPlaylistItemsPager} from './embyUtils';
 
 const serviceId: MediaServiceId = 'emby';
 
-const embySongsSort: MediaListSort = {
-    sortOptions: {
-        SortName: 'Title',
-        'Artist,Album,ParentIndexNumber,IndexNumber,SortName': 'Artist',
-        'Album,ParentIndexNumber,IndexNumber': 'Album',
-        'AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName': 'Album Artist',
-    },
-    defaultSort: {
-        sortBy: 'AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName',
-        sortOrder: 1,
-    },
-};
-
-const embyAlbumsSort: MediaListSort = {
-    sortOptions: {
-        SortName: 'Title',
-        'AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName': 'Artist',
-        'ProductionYear,PremiereDate,SortName': 'Year',
-    },
-    defaultSort: {
-        sortBy: 'AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName',
-        sortOrder: 1,
-    },
-};
-
-const embyArtistAlbumsSort: MediaListSort = {
-    sortOptions: {
-        SortName: 'Title',
-        'ProductionYear,PremiereDate,SortName': 'Year',
-    },
-    defaultSort: {
-        sortBy: 'ProductionYear,PremiereDate,SortName',
-        sortOrder: -1,
-    },
-};
-
-const embyPlaylistLayout: Partial<MediaListLayout> = {
+export const embyPlaylistLayout: Partial<MediaListLayout> = {
     card: {
         h1: 'Name',
         h2: 'Genre',
@@ -80,44 +52,78 @@ const embyPlaylistLayout: Partial<MediaListLayout> = {
     details: ['Name', 'Genre', 'TrackCount', 'Progress'],
 };
 
-export const embyPlaylistItemsSort: MediaListSort = {
-    sortOptions: {
-        ListItemOrder: 'Position',
-        SortName: 'Title',
-        'Artist,Album,ParentIndexNumber,IndexNumber,SortName': 'Artist',
-    },
-    defaultSort: {
-        sortBy: 'ListItemOrder',
-        sortOrder: 1,
-    },
-};
-
 export const embySearch: MediaMultiSource = {
     id: `${serviceId}/search`,
     title: 'Search',
     icon: 'search',
     searchable: true,
     sources: [
-        createSearch<MediaItem>(ItemType.Media, {
-            id: 'songs',
-            title: 'Songs',
-            primaryItems: {layout: {view: 'details'}},
-        }),
-        createSearch<MediaAlbum>(ItemType.Album, {
-            id: 'albums',
-            title: 'Albums',
-        }),
-        createSearch<MediaArtist>(ItemType.Artist, {
-            id: 'artists',
-            title: 'Artists',
-            secondaryItems: {sort: embyArtistAlbumsSort},
-        }),
-        createSearch<MediaPlaylist>(ItemType.Playlist, {
-            id: 'playlists',
-            title: 'Playlists',
-            primaryItems: {layout: embyPlaylistLayout},
-            secondaryItems: {sort: embyPlaylistItemsSort},
-        }),
+        createSearch<MediaItem>(
+            ItemType.Media,
+            {
+                id: 'songs',
+                title: 'Songs',
+                primaryItems: {
+                    layout: {view: 'details'},
+                    sort: embySongsSort,
+                },
+            },
+            embySongsSortMap
+        ),
+        createSearch<MediaAlbum>(
+            ItemType.Album,
+            {
+                id: 'albums',
+                title: 'Albums',
+                primaryItems: {
+                    sort: embyAlbumsSort,
+                },
+            },
+            embyAlbumsSortMap
+        ),
+        createSearch<MediaArtist>(
+            ItemType.Artist,
+            {
+                id: 'artists',
+                title: 'Artists',
+                primaryItems: {
+                    sort: {
+                        defaultSort: {
+                            sortBy: 'Name',
+                            sortOrder: 1,
+                        },
+                    },
+                },
+                secondaryItems: {
+                    sort: embyArtistAlbumsSort,
+                },
+            },
+            {Name: 'SortName'}
+        ),
+        createSearch<MediaPlaylist>(
+            ItemType.Playlist,
+            {
+                id: 'playlists',
+                title: 'Playlists',
+                primaryItems: {
+                    layout: embyPlaylistLayout,
+                    sort: {
+                        sortOptions: {
+                            Name: 'Name',
+                            AddedAt: 'Date Added',
+                        },
+                        defaultSort: {
+                            sortBy: 'Name',
+                            sortOrder: 1,
+                        },
+                    },
+                },
+                secondaryItems: {
+                    sort: embyPlaylistItemsSort,
+                },
+            },
+            embyPlaylistsSortMap
+        ),
     ],
 };
 
@@ -136,7 +142,7 @@ const embyLikedSongs: MediaSource<MediaItem> = {
         return createItemsPager({
             ParentId: getMusicLibraryId(),
             Filters: 'IsFavorite',
-            ...getSortParams(sort),
+            ...getSortParams(sort, embySongsSortMap),
         });
     },
 };
@@ -157,7 +163,7 @@ const embyLikedAlbums: MediaSource<MediaAlbum> = {
             ParentId: getMusicLibraryId(),
             Filters: 'IsFavorite',
             IncludeItemTypes: 'MusicAlbum',
-            ...getSortParams(sort),
+            ...getSortParams(sort, embyAlbumsSortMap),
         });
     },
 };
@@ -255,12 +261,12 @@ const embyPlaylists: MediaSource<MediaPlaylist> = {
         layout: embyPlaylistLayout,
         sort: {
             sortOptions: {
-                SortName: 'Name',
-                'DateCreated,SortName': 'Date Created',
+                Name: 'Name',
+                AddedAt: 'Date Added',
             },
             defaultSort: {
-                sortBy: 'SortName',
-                sortOrder: 1,
+                sortBy: 'AddedAt',
+                sortOrder: -1,
             },
         },
     },
@@ -273,7 +279,7 @@ const embyPlaylists: MediaSource<MediaPlaylist> = {
             {
                 ParentId: getMusicLibraryId(),
                 IncludeItemTypes: 'Playlist',
-                ...getSortParams(sort),
+                ...getSortParams(sort, embyPlaylistsSortMap),
             },
             {
                 childSort: embyPlaylistItemsSort.defaultSort,
@@ -315,7 +321,7 @@ const embyTracksByGenre: MediaSource<MediaItem> = {
                 ParentId: getMusicLibraryId(),
                 GenreIds: genre.id,
                 IncludeItemTypes: 'Audio',
-                ...getSortParams(sort),
+                ...getSortParams(sort, embySongsSortMap),
             });
         } else {
             return new SimplePager();
@@ -337,7 +343,7 @@ const embyAlbumsByGenre: MediaSource<MediaAlbum> = {
                 ParentId: getMusicLibraryId(),
                 GenreIds: genre.id,
                 IncludeItemTypes: 'MusicAlbum',
-                ...getSortParams(sort),
+                ...getSortParams(sort, embyAlbumsSortMap),
             });
         } else {
             return new SimplePager();
@@ -487,7 +493,6 @@ const embyFolders: MediaSource<MediaFolderItem> = {
     title: 'Folders',
     icon: 'folder',
     itemType: ItemType.Folder,
-    Component: FolderBrowser,
 
     search(): Pager<MediaFolderItem> {
         const root: Writable<SetOptional<MediaFolder, 'pager'>> = {
@@ -560,7 +565,8 @@ export default embySources;
 
 function createSearch<T extends MediaObject>(
     itemType: T['itemType'],
-    props: Except<MediaSource<T>, 'itemType' | 'icon' | 'search'>
+    props: Except<MediaSource<T>, 'itemType' | 'icon' | 'search'>,
+    sortMap: Record<string, string>
 ): MediaSource<T> {
     const id = `${serviceId}/search/${props.id}`;
     let options: Partial<PagerConfig<T>> | undefined;
@@ -588,8 +594,26 @@ function createSearch<T extends MediaObject>(
         itemType,
         icon: 'search',
 
-        search({q = ''}: {q?: string} = {}): Pager<T> {
-            return createSearchPager(itemType, q, undefined, options, createChildPager);
+        search(
+            {q = ''}: {q?: string} = {},
+            sort = props.primaryItems?.sort?.defaultSort
+        ): Pager<T> {
+            const sortParams = sort && !q ? getSortParams(sort, sortMap) : undefined;
+            if (itemType === ItemType.Artist && !q) {
+                return new EmbyPager<T>(
+                    'Artists/AlbumArtists',
+                    {
+                        ParentId: getMusicLibraryId(),
+                        UserId: embySettings.userId,
+                        ...sortParams,
+                    },
+                    options,
+                    undefined,
+                    createChildPager
+                );
+            } else {
+                return createSearchPager(itemType, q, sortParams, options, createChildPager);
+            }
         },
     };
 }
@@ -617,12 +641,10 @@ export function createSearchPager<T extends MediaObject>(
 
         case ItemType.Artist:
             params.IncludeItemTypes = 'MusicArtist';
-            params.SortBy = 'SortName';
             break;
 
         case ItemType.Playlist:
             params.IncludeItemTypes = 'Playlist';
-            params.SortBy = 'SortName';
             break;
     }
     return createItemsPager(params, options, createChildPager);

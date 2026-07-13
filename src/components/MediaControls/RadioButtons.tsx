@@ -1,10 +1,16 @@
 import React, {useCallback, useEffect, useState} from 'react';
+import {stopPropagation} from 'utils';
 import mediaPlayback from 'services/mediaPlayback';
+import mediaPlayer from 'services/mediaPlayback/mediaPlayer';
 import Icon from 'components/Icon';
 import {IconButton} from 'components/Button';
 import MediaButton from 'components/MediaControls/MediaButton';
+import useObservable from 'hooks/useObservable';
 import usePlaybackState from 'hooks/usePlaybackState';
 import {MediaControlsProps} from './MediaControls';
+
+const observeCanSkipNext = () => mediaPlayer.observeCanSkipNext();
+const observeCanSkipPrev = () => mediaPlayer.observeCanSkipPrev();
 
 export default function RadioButtons({overlay}: MediaControlsProps) {
     const Button = overlay ? IconButton : MediaButton;
@@ -12,6 +18,8 @@ export default function RadioButtons({overlay}: MediaControlsProps) {
     const {currentTime, startedAt} = usePlaybackState();
     const playbackStarted = currentTime >= 1 && Date.now() - startedAt >= 1000;
     const tabIndex = overlay ? -1 : undefined;
+    const canSkipNext = useObservable(observeCanSkipNext, false);
+    const canSkipPrev = useObservable(observeCanSkipPrev, false);
 
     useEffect(() => {
         if (playbackStarted) {
@@ -35,17 +43,19 @@ export default function RadioButtons({overlay}: MediaControlsProps) {
         <>
             {overlay ? <Icon name="radio" /> : null}
             <Button
-                icon="play-reversed"
+                icon="radio-prev"
                 title="Previous radio track"
                 onClick={skipPrev}
-                disabled={disabled}
+                onDoubleClick={stopPropagation}
+                disabled={disabled || !canSkipPrev}
                 tabIndex={tabIndex}
             />
             <Button
-                icon="play"
+                icon="radio-next"
                 title="Next radio track"
                 onClick={skipNext}
-                disabled={disabled}
+                onDoubleClick={stopPropagation}
+                disabled={disabled || !canSkipNext}
                 tabIndex={tabIndex}
             />
         </>

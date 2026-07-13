@@ -1,7 +1,8 @@
 import mediaPlayer from 'services/mediaPlayback/mediaPlayer';
+import OmniAnalyserNode from 'services/audio/OmniAnalyserNode';
 import spotifyAudioAnalyser from './spotifyAudioAnalyser';
 import spotifyPlayer from './spotifyPlayer';
 
+OmniAnalyserNode.spotifyAudioAnalyser = spotifyAudioAnalyser;
 spotifyAudioAnalyser.player = spotifyPlayer;
-
-mediaPlayer.registerPlayer(spotifyPlayer, (item) => !!item?.src.startsWith('spotify:'));
+mediaPlayer.addPlayer(spotifyPlayer, true);

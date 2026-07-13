@@ -5,15 +5,19 @@ import MediaArtist from 'types/MediaArtist';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
+import MediaServiceId from 'types/MediaServiceId';
 import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import SortParams from 'types/SortParams';
 import Thumbnail from 'types/Thumbnail';
 import {exists, uniq} from 'utils';
+import {localeCompare, sorter} from 'services/metadata';
 import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
 import pinStore from 'services/pins/pinStore';
 import ibroadcastLibrary from './ibroadcastLibrary';
 import IBroadcastPlaylistItemsPager from './IBroadcastPlaylistItemsPager';
+
+const serviceId: MediaServiceId = 'ibroadcast';
 
 export function createMediaObject<T extends MediaObject>(
     section: iBroadcast.LibrarySection,
@@ -46,7 +50,7 @@ function createMediaArtist(
     const trackIds: number[] | undefined = artist[map.tracks];
     const mediaArtist: Writable<SetOptional<MediaArtist, 'pager'>> = {
         itemType: ItemType.Artist,
-        src: `ibroadcast:artist:${id}`,
+        src: `${serviceId}:artist:${id}`,
         externalUrl: trackIds ? getExternalUrl(id, 'artists') : undefined,
         title: artist[map.name],
         rating: artist[map.rating],
@@ -68,13 +72,17 @@ export function createArtistAlbumsPager(
         const artistMap = library.artists.map;
         const albumsMap = library.albums.map;
         const tracksMap = library.tracks.map;
+        const albumTrackIds = new Set<number>();
         const allTrackIds = new Set<number>(artist?.[artistMap.tracks] || []);
         const albumIds: number[] = [];
         Object.keys(library.albums).forEach((albumId) => {
             const album = library.albums[albumId];
             if (album?.[albumsMap.artist_id] === id) {
                 albumIds.push(Number(albumId));
-                album[albumsMap.tracks]?.forEach((id: number) => allTrackIds.add(id));
+                album[albumsMap.tracks]?.forEach((id: number) => {
+                    albumTrackIds.add(id);
+                    allTrackIds.add(id);
+                });
             }
         });
         Object.keys(library.tracks).forEach((trackId) => {
@@ -93,15 +101,36 @@ export function createArtistAlbumsPager(
             );
         }
         const albums = albumIds.map((id) => createMediaAlbum(id, library));
+        const hasAlbums = albums.length > 0;
+        if (hasAlbums) {
+            const otherTrackIds = [...allTrackIds].filter((id) => !albumTrackIds.has(id));
+            if (otherTrackIds.length > 0) {
+                const otherTracksAlbum: MediaAlbum = {
+                    itemType: ItemType.Album,
+                    src: `${serviceId}:other-tracks:${id}`,
+                    title: 'Other Tracks',
+                    artist: artist[artistMap.name],
+                    thumbnails: createThumbnails(artist[artistMap.artwork_id]),
+                    pager: new SimpleMediaPager(async () => {
+                        const tracks = otherTrackIds.map((id) => createMediaItem(id, library));
+                        return sorter.sort(tracks, 'Year');
+                    }),
+                    trackCount: otherTrackIds.length,
+                    synthetic: true,
+                };
+                albums.push(otherTracksAlbum);
+            }
+        }
         const allTracksAlbum: MediaAlbum = {
             itemType: ItemType.Album,
-            src: `ibroadcast:all-tracks:${id}`,
-            title: 'All Tracks',
+            src: `${serviceId}:${hasAlbums ? 'all' : 'other'}-tracks:${id}`,
+            title: hasAlbums ? 'All Tracks' : 'Tracks',
             artist: artist[artistMap.name],
             thumbnails: createThumbnails(artist[artistMap.artwork_id]),
-            pager: new SimpleMediaPager(async () =>
-                [...allTrackIds].map((id) => createMediaItem(id, library))
-            ),
+            pager: new SimpleMediaPager(async () => {
+                const tracks = [...allTrackIds].map((id) => createMediaItem(id, library));
+                return sorter.sort(tracks, 'Year');
+            }),
             trackCount: allTrackIds.size,
             synthetic: true,
         };
@@ -121,7 +150,7 @@ function createMediaAlbum(id: number, library: iBroadcast.Library): MediaAlbum {
     const firstTrack = tracks[trackIds[0]];
     return {
         itemType: ItemType.Album,
-        src: `ibroadcast:album:${id}`,
+        src: `${serviceId}:album:${id}`,
         externalUrl: getExternalUrl(id, 'albums'),
         title: album[map.name],
         thumbnails: createThumbnails(firstTrack?.[tracks.map.artwork_id]),
@@ -145,7 +174,7 @@ export function createMediaPlaylist(
     const playlists = library.playlists;
     const playlist = playlists[id];
     const map = playlists.map;
-    const src = `ibroadcast:playlist:${id}`;
+    const src = `${serviceId}:playlist:${id}`;
     const trackIds: number[] = playlist[map.tracks];
     const owned = !playlist[map.type];
     const mediaPlaylist: Writable<SetOptional<MediaPlaylist, 'pager'>> = {
@@ -199,7 +228,7 @@ export function createMediaItem(
     return {
         itemType: ItemType.Media,
         mediaType: MediaType.Audio,
-        src: `ibroadcast:track:${id}`,
+        src: `${serviceId}:track:${id}`,
         // externalUrl: getExternalUrl(id, 'tracks'), // Doesn't work.
         title: track[map.title],
         fileName: track[map.file],
@@ -350,13 +379,13 @@ export function sortAlbums(
         return sortByTitle(artistA, artistB);
     };
     switch (sortBy) {
-        case 'title':
+        case 'Title':
             return sortByTitle(a[map.name], b[map.name]) * sortOrder;
 
-        case 'artist':
+        case 'Artist':
             return sortByArtist() * sortOrder || sortByTitle(a[map.name], b[map.name]);
 
-        case 'year':
+        case 'Year':
             return (
                 (a[map.year] - b[map.year]) * sortOrder ||
                 sortByArtist() ||
@@ -411,16 +440,16 @@ export function sortTracks(
         return discA === discB ? a[map.track] - b[map.track] : discA - discB;
     };
     switch (sortBy) {
-        case 'title':
+        case 'Title':
             return sortByTitle(a[map.title], b[map.title]) * sortOrder;
 
-        case 'album':
+        case 'Album':
             return sortByAlbum() * sortOrder || sortByTrack();
 
-        case 'artist':
+        case 'Artist':
             return sortByArtist() * sortOrder || sortByAlbum() || sortByTrack();
 
-        case 'year':
+        case 'Year':
             return sortByYear() * sortOrder || sortByAlbum() || sortByTrack();
 
         default:
@@ -429,5 +458,5 @@ export function sortTracks(
 }
 
 export function sortByTitle(a: string, b: string): number {
-    return (a || '').localeCompare(b || '', undefined, {sensitivity: 'base'});
+    return localeCompare(a, b);
 }

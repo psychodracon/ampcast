@@ -1,10 +1,14 @@
 import React from 'react';
+import {LyricsProvider} from 'types/Lyrics';
 import MediaItem from 'types/MediaItem';
-import {canShowLyrics} from 'services/lyrics';
+import {LyricsNotAvailableError} from 'services/errors';
+import {t} from 'services/i18n';
 import {getServiceFromSrc} from 'services/mediaServices';
 import ErrorBox from 'components/Errors/ErrorBox';
+import MediaSourceLabel from 'components/MediaSources/MediaSourceLabel';
 import TextBox from 'components/TextBox';
 import useLyrics from 'hooks/useLyrics';
+import './Lyrics.scss';
 
 export interface LyricsProps {
     item: MediaItem;
@@ -14,35 +18,59 @@ export default function Lyrics({item}: LyricsProps) {
     const {lyrics, loaded, error} = useLyrics(item);
 
     return (
-        <div className="media-info-lyrics">
-            {canShowLyrics(item) ? (
-                loaded ? (
-                    error ? (
-                        <ErrorBox error={error} reportedBy="Lyrics" />
-                    ) : lyrics ? (
+        <div className="lyrics">
+            {loaded ? (
+                lyrics ? (
+                    <>
                         <TextBox>
-                            {lyrics?.plain.map((text, index) => (
+                            {lyrics.plain.map((text, index) => (
                                 <p key={index}>{text}</p>
                             ))}
                         </TextBox>
-                    ) : (
-                        <p>Lyrics not found</p>
-                    )
+                        {lyrics.provider ? <ProvidedBy {...lyrics.provider} /> : null}
+                        {lyrics.synced ? (
+                            <p className="synced-available">
+                                <MediaSourceLabel
+                                    icon="clock"
+                                    text={t('Synchronized lyrics available')}
+                                />
+                            </p>
+                        ) : null}
+                    </>
+                ) : error ? (
+                    <LyricsError item={item} error={error} />
                 ) : (
-                    <p>Loading lyrics…</p>
+                    <p>Lyrics not found</p>
                 )
             ) : (
-                <LyricsNotAvailable item={item} />
+                <p>Loading lyrics…</p>
             )}
         </div>
     );
 }
 
-function LyricsNotAvailable({item}: LyricsProps) {
-    const service = getServiceFromSrc(item);
+function LyricsError({item, error}: LyricsProps & {error: unknown}) {
+    if (error instanceof LyricsNotAvailableError) {
+        const service = getServiceFromSrc(item);
+        return (
+            <div className="note lyrics-not-available">
+                <p>
+                    {service?.lyricsDisabled
+                        ? `Lyrics not supported for ${service.name}`
+                        : error.message}
+                </p>
+            </div>
+        );
+    } else {
+        return <ErrorBox error={error} reportedBy="Lyrics" />;
+    }
+}
+
+function ProvidedBy({icon, name}: LyricsProvider) {
+    const providedBy = `Provided by ${name}`;
     return (
-        <div className="note">
-            <p>{service ? `Lyrics not available for ${service.name}.` : 'Lyrics not available.'}</p>
-        </div>
+        <p className="external-view">
+            {icon ? <MediaSourceLabel icon={icon} text={providedBy} /> : providedBy}
+        </p>
     );
 }

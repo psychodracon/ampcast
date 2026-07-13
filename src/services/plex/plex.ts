@@ -15,7 +15,6 @@ import Pager from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
 import PersonalMediaService from 'types/PersonalMediaService';
 import Pin, {Pinnable} from 'types/Pin';
-import PlayableItem from 'types/PlayableItem';
 import PlaybackType from 'types/PlaybackType';
 import ServiceType from 'types/ServiceType';
 import {getMediaObjectId} from 'utils';
@@ -35,12 +34,16 @@ import {
 import plexApi from './plexApi';
 import plexMediaType from './plexMediaType';
 import PlexPager from './PlexPager';
+import PlexRadioPager from './PlexRadioPager';
 import {scrobble} from './plexScrobbler';
 import plexSettings from './plexSettings';
-import plexSources, {createSearchPager, plexEditablePlaylists, plexSearch} from './plexSources';
-import Login from './components/PlexLogin';
+import plexSources, {
+    createSearchPager,
+    plexEditablePlaylists,
+    plexPlaylistItems,
+    plexSearch,
+} from './plexSources';
 import ServerSettings from './components/PlexServerSettings';
-import './bootstrap';
 
 const serviceId: MediaServiceId = 'plex';
 
@@ -50,7 +53,7 @@ const plex: PersonalMediaService = {
     icon: serviceId,
     url: 'https://www.plex.tv',
     serviceType: ServiceType.PersonalMedia,
-    Components: {Login, ServerSettings},
+    Components: {ServerSettings},
     get internetRequired() {
         return plexSettings.internetRequired;
     },
@@ -85,6 +88,7 @@ const plex: PersonalMediaService = {
     canRate,
     compareForRating,
     createPlaylist,
+    createRadioPager,
     createSourceFromPin,
     editPlaylist,
     getFilters,
@@ -118,7 +122,7 @@ function canPin(item: MediaObject): boolean {
 }
 
 function canRate<T extends MediaObject>(item: T): boolean {
-    if (!item.src.startsWith(`${serviceId}:`) || item.synthetic) {
+    if (item.synthetic) {
         return false;
     }
     switch (item.itemType) {
@@ -155,6 +159,14 @@ async function createPlaylist<T extends MediaItem>(
     };
 }
 
+function createRadioPager(item: MediaItem): Pager<MediaItem> {
+    const [, type] = item.src.split(':');
+    if (type !== 'radio' && type !== 'artist-radio') {
+        throw Error('Not supported');
+    }
+    return new PlexRadioPager(item.src);
+}
+
 async function editPlaylist(playlist: MediaPlaylist): Promise<MediaPlaylist> {
     await plexApi.editPlaylist(playlist);
     return playlist;
@@ -171,6 +183,7 @@ function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
         sourceId: `${serviceId}/pinned-playlist`,
         icon: 'pin',
         isPin: true,
+        secondaryItems: plexPlaylistItems,
 
         search(): Pager<T> {
             return new PlexPager({
@@ -181,7 +194,7 @@ function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
                 },
             });
         },
-    };
+    } as MediaSource<T>;
 }
 
 async function getFilters(
@@ -227,7 +240,7 @@ async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
     return fetchFirstItem<T>(pager, {timeout: 2000});
 }
 
-function getPlayableUrl(item: PlayableItem): string {
+function getPlayableUrl(item: MediaItem): string {
     return plexApi.getPlayableUrl(item);
 }
 
@@ -250,7 +263,7 @@ async function getServerInfo(): Promise<Record<string, string>> {
 }
 
 function getThumbnailUrl(url: string): string {
-    return isLoggedIn() ? url.replace('{plex-token}', plexSettings.accessToken) : 'data:image/png;';
+    return url.replace('{plex-token}', plexSettings.accessToken);
 }
 
 async function lookup(
@@ -263,7 +276,7 @@ async function lookup(
         return [];
     }
     return fetchFirstPage(
-        createSearchPager<MediaItem>(ItemType.Media, `${artist} ${title}`, {
+        createSearchPager<MediaItem>(ItemType.Media, `${artist} ${title}`, undefined, {
             pageSize: limit,
             maxSize: limit,
             passive: true,

@@ -37,6 +37,7 @@
 
     .badge {
         font-size: max(0.5em, 9px);
+        height: 1.5em;
     }
 
     .badge.explicit {
@@ -106,6 +107,10 @@
         pointer-events: none;
     }
 
+    &:focus .list-view-row.selected .star-rating {
+        pointer-events: auto;
+    }
+
     .listen-date {
         .text {
             display: inline-flex;
@@ -121,10 +126,6 @@
         .icon {
             margin-right: 0.25em;
         }
-    }
-
-    &:focus .list-view-row.selected .star-rating {
-        pointer-events: auto;
     }
 
     .list-view-row {
@@ -454,14 +455,11 @@
                 }
             }
 
-            .owner,
-            .genre {
-                -webkit-line-clamp: 1;
-            }
-
-            .owner,
             .genre,
             .description {
+                margin-top: 0.25em;
+                line-height: 1;
+
                 .text {
                     font-size: 0.75em;
                 }
@@ -524,6 +522,12 @@
                     height: 1.125em;
                     padding: 0 0.375em;
                 }
+            }
+
+            .genre,
+            .description {
+                -webkit-line-clamp: 1;
+                line-height: normal;
             }
 
             .actions {
@@ -675,6 +679,12 @@
 
     .media-items:not(.multi-disc) & {
         .disc {
+            display: none;
+        }
+    }
+
+    .media-items.synthetic & {
+        .disc-empty {
             display: none;
         }
     }

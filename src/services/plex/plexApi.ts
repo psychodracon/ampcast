@@ -10,10 +10,18 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaType from 'types/MediaType';
 import {Page} from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
-import PlayableItem from 'types/PlayableItem';
 import PlaybackType from 'types/PlaybackType';
 import {NoMusicLibraryError} from 'services/errors';
-import {browser, canPlayMedia, getMediaObjectId, groupBy, partition, uniq, uniqBy} from 'utils';
+import {
+    browser,
+    canPlayMedia,
+    getMediaObjectId,
+    groupBy,
+    partition,
+    uniq,
+    uniqBy,
+    uuid4,
+} from 'utils';
 import plexItemType from './plexItemType';
 import plexMediaType from './plexMediaType';
 import plexSettings from './plexSettings';
@@ -134,7 +142,7 @@ async function getPage<T extends plex.MediaObject>(
         total = page.total || items.length;
         if (page.atEnd && request.params?.type === plexMediaType.Track) {
             items = refineTracksSearchResults(
-                request.params?.title || '',
+                request.params?.originalTitle || request.params?.title || '',
                 items as readonly plex.Track[]
             ) as readonly T[];
             total = items.length;
@@ -208,8 +216,13 @@ async function createPlayQueue(
     {src}: {src: string},
     params: Record<string, any> = {}
 ): Promise<plex.PlayQueue> {
-    const [, type, ratingKey] = src.split(':');
-    const key = type === 'radio' ? ratingKey : `/library/metadata/${ratingKey}`;
+    const [, type, id] = src.split(':');
+    const key =
+        type === 'artist-radio'
+            ? `/library/metadata/${id}/station/${uuid4()}?type=10`
+            : type === 'radio'
+              ? id
+              : `/library/metadata/${id}`;
     const {MediaContainer: playQueue} = await fetchJSON<plex.PlayQueueResponse>({
         path: '/playQueues',
         method: 'POST',
@@ -305,15 +318,22 @@ async function getLyrics(path: string): Promise<Lyrics | null> {
     const {
         MediaContainer: {Lyrics: lyrics},
     } = await fetchJSON<plex.LyricsResponse>({path});
-    const synched: Lyrics['synched'] = lyrics[0].Line.filter((line) => !!line.startOffset).map(
-        (line) => ({
-            text: line.Span?.[0].text || '',
-            startTime: line.startOffset / 1000,
-            endTime: (line.endOffset || 0) / 1000,
-        })
-    );
-    const plain = synched.map((line) => line.text);
-    return {plain, synched};
+    const timedLyrics = lyrics.find((lyrics) => lyrics.timed);
+    if (timedLyrics) {
+        const lyrics: Lyrics['synced'] = timedLyrics.Line.filter((line) => !!line.startOffset).map(
+            (line) => ({
+                text: line.Span?.[0].text || '',
+                startTime: (line.startOffset || 0) / 1000,
+                endTime: (line.endOffset || 0) / 1000,
+            })
+        );
+        const plain = lyrics.map((line) => line.text);
+        const synced = lyrics.filter((line) => line.startTime !== line.endTime);
+        return {plain, synced: synced.length ? synced : undefined};
+    } else {
+        const plain: Lyrics['plain'] = lyrics[0].Line.map((line) => line.Span?.[0].text || '');
+        return {plain};
+    }
 }
 
 const cachedFilters: Record<string, readonly MediaFilter[]> = {};
@@ -570,16 +590,10 @@ async function getRadioStations(): Promise<PlexRadioStations> {
     return cachedRadioStations;
 }
 
-function getPlayableUrl(item: PlayableItem): string {
+function getPlayableUrl(item: MediaItem): string {
     const {host, accessToken} = plexSettings;
     if (host && accessToken) {
-        if (item.playbackType === PlaybackType.Direct) {
-            const [src] = item.srcs || [];
-            if (!src) {
-                throw Error('No playable source');
-            }
-            return `${host}${src}?X-Plex-Token=${accessToken}`;
-        } else {
+        if (item.playbackType === PlaybackType.HLS) {
             const [, type, ratingKey] = item.src.split(':');
             const mediaType = type === 'video' ? 'video' : 'music';
             const params = new URLSearchParams({
@@ -597,6 +611,12 @@ function getPlayableUrl(item: PlayableItem): string {
                     'add-transcode-target(type=musicProfile&context=streaming&protocol=dash&container=mp4&audioCodec=aac)+add-transcode-target(type=musicProfile&context=streaming&protocol=hls&container=mpegts&audioCodec=aac,mp3)',
             });
             return `${host}/${mediaType}/:/transcode/universal/start.mpd?${params}`;
+        } else {
+            const [src] = item.srcs || [];
+            if (!src) {
+                throw Error('No playable source');
+            }
+            return `${host}${src}?X-Plex-Token=${accessToken}`;
         }
     } else {
         throw Error('Not logged in');

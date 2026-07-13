@@ -13,7 +13,7 @@ export default function useSource<T extends MediaObject>(
     params?: SearchParams | MediaFilter | Record<string, unknown>
 ): Pager<T> | null {
     const [pager, setPager] = useState<Pager<T> | null>(null);
-    const sort = useSorting(source?.id);
+    const sort = useSorting(source ? `${source.sourceId || source.id}/1` : undefined);
 
     useLayoutEffect(() => {
         try {
@@ -22,7 +22,7 @@ export default function useSource<T extends MediaObject>(
             return () => pager?.disconnect();
         } catch (err) {
             if (err instanceof MediaSourceError) {
-                const pager = new ErrorPager<T>(err);
+                const pager = new ErrorPager<T>(() => err);
                 setPager(pager);
             } else {
                 throw err;

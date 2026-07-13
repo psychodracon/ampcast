@@ -13,16 +13,20 @@ export default interface Player<T> {
     observeDuration(): Observable<number>;
     observeEnded(): Observable<void>;
     observeError(): Observable<unknown>;
-    observeNowPlaying?(item: PlaylistItem): Observable<PlaylistItem>; // radio playback
     observePlaying(): Observable<void>;
     appendTo(parentElement: HTMLElement): void;
+    canPlay(src: T): boolean;
     load(src: T): void;
     loadNext?(src: T | null): void;
     pause(): void;
     play(): void;
     resize(width: number, height: number): void;
     seek(time: number): void;
-    skipNext?(): Promise<void>; // radio playback
-    skipPrev?(): Promise<void>; // radio playback
     stop(): void;
+    // Radio playback.
+    observeCanSkipNext?(): Observable<boolean>;
+    observeCanSkipPrev?(): Observable<boolean>;
+    observeNowPlaying?(item: PlaylistItem): Observable<PlaylistItem>;
+    skipNext?(): Promise<void>;
+    skipPrev?(): Promise<void>;
 }

@@ -10,6 +10,7 @@ import MediaFolderItem from 'types/MediaFolderItem';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
+import MediaServiceId from 'types/MediaServiceId';
 import MediaType from 'types/MediaType';
 import Pager, {PagerConfig} from 'types/Pager';
 import ParentOf from 'types/ParentOf';
@@ -29,8 +30,11 @@ import plexItemType from './plexItemType';
 import plexMediaType from './plexMediaType';
 import plexSettings from './plexSettings';
 import PlexPager, {PlexPlaylistItemsPager} from './PlexPager';
+import {plexAlbumsSortMap, plexArtistAlbumsSort} from './plexSorting';
 
 const logger = new Logger('plexUtils');
+
+const serviceId: MediaServiceId = 'plex';
 
 export function createMediaObjects<T extends MediaObject>(
     objects: readonly plex.MediaObject[],
@@ -77,10 +81,23 @@ export function createMediaObject<T extends MediaObject>(
     }
 }
 
+export function createPlaylistItems<T extends MediaItem>(
+    tracks: readonly plex.Track[],
+    parent: ParentOf<T>,
+    albums: readonly MediaAlbum[] = [],
+    offset: number
+): readonly T[] {
+    return tracks.map((track, index) => {
+        const album = albums.find((album) => album.src.endsWith(`:${track.parentRatingKey}`));
+        return createMediaItemFromTrack(track, album, parent, offset + index + 1) as T;
+    });
+}
+
 export function createMediaItemFromTrack(
     track: plex.Track,
     album?: MediaAlbum | undefined,
-    parent?: MediaObject
+    parent?: MediaObject,
+    position?: number
 ): MediaItem {
     const media = track.Media?.[0];
     const part = media?.Part?.[0];
@@ -91,10 +108,7 @@ export function createMediaItemFromTrack(
         const value = parseFloat(numeric);
         return isNaN(value) ? undefined : value;
     };
-    album = album || (parent as MediaAlbum);
-    if (album?.title === '' || album?.title === '[Unknown Album]') {
-        album = undefined;
-    }
+    album = album || (parent?.itemType === ItemType.Album ? parent : undefined);
 
     return {
         src: getSrc('audio', track),
@@ -103,6 +117,7 @@ export function createMediaItemFromTrack(
         mediaType: MediaType.Audio,
         title,
         fileName,
+        position,
         description: track.summary,
         externalUrl: getExternalUrl(track),
         addedAt: track.addedAt,
@@ -112,7 +127,7 @@ export function createMediaItemFromTrack(
               ? [album.artist]
               : undefined,
         albumArtist: album?.artist,
-        album: album?.title,
+        album: album?.title === '[Unknown Album]' ? undefined : album?.title || undefined,
         duration: track.duration / 1000,
         track: track.index,
         disc: track.parentIndex,
@@ -266,7 +281,7 @@ function createMediaPlaylist(playlist: plex.Playlist, noPager?: boolean): MediaP
 }
 
 function createRadioStation(radio: plex.Radio): MediaItem {
-    const src = `plex:radio:${radio.key}`;
+    const src = `${serviceId}:radio:${radio.key}`;
     return {
         src,
         title: radio.title,
@@ -285,7 +300,7 @@ function createRadioStation(radio: plex.Radio): MediaItem {
 function createMediaFolder(folder: plex.Folder, parent?: MediaObject): MediaFolder {
     const mediaFolder: Writable<SetOptional<MediaFolder, 'pager'>> = {
         itemType: ItemType.Folder,
-        src: `plex:folder:${folder.key}`,
+        src: `${serviceId}:folder:${folder.key}`,
         title: folder.title,
         fileName: folder.title,
         path: parent?.itemType === ItemType.Folder ? `${parent.path}/${folder.title}` : '/',
@@ -395,7 +410,7 @@ function getRating(rating: number | undefined): number | undefined {
 }
 
 function getSrc(type: string, object: plex.MediaObject): string {
-    return `plex:${type}:${object.ratingKey || nanoid()}`;
+    return `${serviceId}:${type}:${object.ratingKey || nanoid()}`;
 }
 
 function createThumbnails(thumb: string): Thumbnail[] | undefined {
@@ -433,42 +448,41 @@ function createFolderPager(folder: MediaFolder, parent?: MediaObject): Pager<Med
 
 export function createArtistAlbumsPager(
     artist: MediaArtist,
-    albumSort?: SortParams
+    {sortBy, sortOrder} = plexArtistAlbumsSort.defaultSort
 ): Pager<MediaAlbum> {
     const otherTracks = createArtistOtherTracks(artist);
     if (artist.synthetic) {
         const otherTracksPager = new SimplePager<MediaAlbum>([otherTracks]);
         return otherTracksPager;
     } else {
-        const createNonEmptyPager = (album: MediaAlbum) =>
+        const createNonEmptyPager = (album: MediaAlbum, ...albums: MediaAlbum[]) =>
             new SimpleMediaPager<MediaAlbum>(async () => {
                 try {
                     const items = await fetchFirstPage(album.pager, {keepAlive: true});
                     if (items.length === 0) {
                         album.pager.disconnect();
-                        return [];
+                        return [...albums];
                     } else {
-                        return [album];
+                        return [album, ...albums];
                     }
                 } catch (err) {
                     logger.error(err);
                     album.pager.disconnect();
-                    return [];
+                    return [...albums];
                 }
             });
         const albumsPager = createPager<MediaAlbum>({
-            path: getMusicLibraryPath(),
             params: {
                 'artist.id': getMediaObjectId(artist),
                 type: plexMediaType.Album,
-                sort: albumSort
-                    ? `${albumSort.sortBy}:${albumSort.sortOrder === -1 ? 'desc' : 'asc'}`
-                    : 'year:desc',
+                sort: `${plexAlbumsSortMap[sortBy] || sortBy}:${sortOrder === -1 ? 'desc' : 'asc'}`,
             },
         });
         const videos = createArtistVideos(artist);
+        const radios = createArtistRadios(artist);
+        const allTracks = createArtistAllTracks(artist);
         const topPager = createNonEmptyPager(videos);
-        const otherTracksPager = createNonEmptyPager(otherTracks);
+        const otherTracksPager = createNonEmptyPager(otherTracks, allTracks, radios);
         return new WrappedPager(topPager, albumsPager, otherTracksPager);
     }
 }
@@ -476,11 +490,24 @@ export function createArtistAlbumsPager(
 function createArtistOtherTracks(artist: MediaArtist): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `plex:other-tracks:${getMediaObjectId(artist)}`,
+        src: `${serviceId}:other-tracks:${getMediaObjectId(artist)}`,
         title: artist.synthetic ? 'Tracks' : 'Other Tracks',
         artist: artist.title,
         thumbnails: artist.thumbnails,
-        pager: createOtherTracksPager(artist),
+        pager: createArtistOtherTracksPager(artist),
+        trackCount: undefined,
+        synthetic: true,
+    };
+}
+
+function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
+    return {
+        itemType: ItemType.Album,
+        src: `${serviceId}:all-tracks:${getMediaObjectId(artist)}`,
+        title: 'All Tracks',
+        artist: artist.title,
+        thumbnails: artist.thumbnails,
+        pager: createArtistAllTracksPager(artist),
         trackCount: undefined,
         synthetic: true,
     };
@@ -489,26 +516,77 @@ function createArtistOtherTracks(artist: MediaArtist): MediaAlbum {
 function createArtistVideos(artist: MediaArtist): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `plex:videos:${getMediaObjectId(artist)}`,
+        src: `${serviceId}:videos:${getMediaObjectId(artist)}`,
         title: 'Music Videos',
         artist: artist.title,
         thumbnails: artist.thumbnails,
-        pager: createVideosPager(artist),
+        pager: createArtistVideosPager(artist),
         trackCount: undefined,
         synthetic: true,
     };
 }
 
-function createOtherTracksPager(artist: MediaArtist): Pager<MediaItem> {
-    return createPager({
-        params: {
-            originalTitle: artist.title,
-            type: plexMediaType.Track,
-        },
-    });
+function createArtistRadios(artist: MediaArtist): MediaAlbum {
+    const id = getMediaObjectId(artist);
+    const src = `${serviceId}:artist-radio:${id}`;
+    const radio: MediaItem = {
+        src,
+        title: `${artist.title} - Radio`,
+        itemType: ItemType.Media,
+        mediaType: MediaType.Audio,
+        linearType: LinearType.Station,
+        playbackType: PlaybackType.Direct,
+        duration: MAX_DURATION,
+        thumbnails: artist.thumbnails,
+        playedAt: 0,
+        skippable: true,
+        isFavoriteStation: stationStore.isFavorite({src}),
+        synthetic: true,
+    };
+    return {
+        itemType: ItemType.Album,
+        src: `${serviceId}:radios:${id}`,
+        title: 'Radios',
+        artist: artist.title,
+        thumbnails: artist.thumbnails,
+        pager: new SimplePager([radio]),
+        trackCount: undefined,
+        synthetic: true,
+    };
 }
 
-function createVideosPager(artist: MediaArtist): Pager<MediaItem> {
+const artistTracksSort =
+    'album.year,album.titleSort,track.absoluteIndex,track.index,track.titleSort,track.id';
+
+function createArtistOtherTracksPager(artist: MediaArtist): Pager<MediaItem> {
+    return createPager(
+        {
+            params: {
+                originalTitle: artist.title,
+                type: plexMediaType.Track,
+                sort: artistTracksSort,
+            },
+        },
+        {autofill: true, pageSize: 1000}
+    );
+}
+
+function createArtistAllTracksPager(artist: MediaArtist): Pager<MediaItem> {
+    const allAlbumTracks = createPager<MediaItem>(
+        {
+            params: {
+                'artist.id': getMediaObjectId(artist),
+                type: plexMediaType.Track,
+                sort: artistTracksSort,
+            },
+        },
+        {autofill: true, pageSize: 1000}
+    );
+    const otherTracksPager = createArtistOtherTracksPager(artist);
+    return new WrappedPager(undefined, allAlbumTracks, otherTracksPager);
+}
+
+function createArtistVideosPager(artist: MediaArtist): Pager<MediaItem> {
     return createPager({path: `/library/metadata/${getMediaObjectId(artist)}/extras`});
 }
 

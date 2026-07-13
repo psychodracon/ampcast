@@ -1,11 +1,10 @@
 import React, {useCallback, useMemo, useState} from 'react';
-import AlbumType from 'types/AlbumType';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
 import MediaObject from 'types/MediaObject';
 import MediaType from 'types/MediaType';
 import PlaybackType from 'types/PlaybackType';
-import {copyToClipboard, formatTime} from 'utils';
+import {copyToClipboard, formatDuration} from 'utils';
 import {MAX_DURATION} from 'services/constants';
 import {copyMediaObjectToClipboard} from 'services/reporting';
 import {CopyButton} from 'components/Button';
@@ -33,22 +32,7 @@ export default function MediaDetails<T extends MediaObject>({item}: MediaInfoPro
     const renderItem = useCallback((value: any, key: keyof T) => {
         switch (key) {
             case 'albumType':
-                switch (value) {
-                    case AlbumType.Album:
-                        return 'Album';
-                    case AlbumType.LiveAlbum:
-                        return 'LiveAlbum';
-                    case AlbumType.Compilation:
-                        return 'Compilation';
-                    case AlbumType.Soundtrack:
-                        return 'Soundtrack';
-                    case AlbumType.EP:
-                        return 'EP';
-                    case AlbumType.Single:
-                        return 'Single';
-                    default:
-                        return 'unknown';
-                }
+                return value;
 
             case 'itemType':
                 switch (value) {
@@ -117,6 +101,9 @@ export default function MediaDetails<T extends MediaObject>({item}: MediaInfoPro
                 }
 
             case 'addedAt':
+            case 'endedAt':
+            case 'lastfmScrobbledAt':
+            case 'listenbrainzScrobbledAt':
             case 'modifiedAt':
             case 'playedAt':
                 return value ? new Date(value * 1000).toLocaleString() : '';
@@ -125,7 +112,7 @@ export default function MediaDetails<T extends MediaObject>({item}: MediaInfoPro
                 return value ? new Date(value * 1000).toLocaleDateString() : '';
 
             case 'duration':
-                return Math.abs(value) >= MAX_DURATION ? '–:––' : formatTime(value);
+                return Math.abs(value) >= MAX_DURATION ? '–:––' : formatDuration(value);
 
             case 'thumbnails':
                 return `[${value?.length || 0}]`;

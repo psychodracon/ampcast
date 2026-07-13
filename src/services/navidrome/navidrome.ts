@@ -3,6 +3,7 @@ import Action from 'types/Action';
 import CreatePlaylistOptions from 'types/CreatePlaylistOptions';
 import FilterType from 'types/FilterType';
 import ItemType from 'types/ItemType';
+import Lyrics from 'types/Lyrics';
 import MediaItem from 'types/MediaItem';
 import MediaFilter from 'types/MediaFilter';
 import MediaObject from 'types/MediaObject';
@@ -12,7 +13,6 @@ import MediaSource from 'types/MediaSource';
 import Pager, {PagerConfig} from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
 import PersonalMediaService from 'types/PersonalMediaService';
-import PlayableItem from 'types/PlayableItem';
 import Pin, {Pinnable} from 'types/Pin';
 import PlaybackType from 'types/PlaybackType';
 import ServiceType from 'types/ServiceType';
@@ -35,15 +35,15 @@ import {
 } from './navidromeAuth';
 import NavidromeIndexedPager from './NavidromeIndexedPager';
 import navidromeSettings from './navidromeSettings';
+import {navidromePlaylistItemsSort} from './navidromeSorting';
 import navidromeSources, {
     navidromePlaylistItems,
-    navidromePlaylistItemsSort,
     navidromePlaylistLayout,
     navidromePlaylists,
     navidromeSearch,
 } from './navidromeSources';
 import navidromeApi from './navidromeApi';
-import subsonicApi from './subsonicApi';
+import subsonicApi, {subsonicService} from './subsonicApi';
 import {createPlaylistItemsPager} from './navidromeUtils';
 
 const serviceId: MediaServiceId = 'navidrome';
@@ -93,7 +93,9 @@ const navidrome: PersonalMediaService = {
     createPlaylist,
     createSourceFromPin,
     editPlaylist,
+    createRadioPager,
     getFilters,
+    getLyrics,
     getPlayableUrl,
     getPlaybackType,
     getServerInfo,
@@ -119,15 +121,16 @@ function canPin(item: MediaObject): boolean {
 }
 
 function canRate<T extends MediaObject>(item: T): boolean {
+    if (item.synthetic) {
+        return false;
+    }
     switch (item.itemType) {
         case ItemType.Media:
             return !item.linearType;
 
         case ItemType.Artist:
-            return true;
-
         case ItemType.Album:
-            return !item.synthetic;
+            return true;
 
         default:
             return false;
@@ -219,6 +222,14 @@ async function getFilters(filterType: FilterType): Promise<readonly MediaFilter[
     }
 }
 
+async function getLyrics(item: MediaItem): Promise<Lyrics | null> {
+    return subsonicApi.getLyrics(item);
+}
+
+function createRadioPager(item: MediaItem): Pager<MediaItem> {
+    return subsonicService.createRadioPager(item);
+}
+
 async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
     const itemType = item.itemType;
     if (itemType === ItemType.Media && item.linearType) {
@@ -271,11 +282,11 @@ async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
     return bestOf(item, metadata);
 }
 
-function getPlayableUrl(item: PlayableItem): string {
+function getPlayableUrl(item: MediaItem): string {
     return subsonicApi.getPlayableUrl(item);
 }
 
-async function getPlaybackType(item: PlayableItem): Promise<PlaybackType> {
+async function getPlaybackType(item: MediaItem): Promise<PlaybackType> {
     return subsonicApi.getPlaybackType(item);
 }
 
@@ -284,9 +295,7 @@ async function getServerInfo(): Promise<Record<string, string>> {
 }
 
 function getThumbnailUrl(url: string): string {
-    return isLoggedIn()
-        ? url.replace('{navidrome-credentials}', navidromeSettings.credentials)
-        : 'data:image/png;';
+    return url.replace('{navidrome-credentials}', navidromeSettings.credentials);
 }
 
 async function lookup(

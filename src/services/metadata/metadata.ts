@@ -1,4 +1,4 @@
-import {IcecastReadableStream} from 'icecast-metadata-js';
+import IcecastReadableStream from 'icecast-metadata-js/src/IcecastReadableStream';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
 import MediaItem from 'types/MediaItem';
@@ -110,7 +110,67 @@ export function bestOf<T extends MediaObject>(a: T, b: Partial<T> = {}): T {
     return result;
 }
 
-export async function createMediaItemFromTitle(title: string): Promise<MediaItem | null> {
+export async function createMediaItemFromTitle(text = ''): Promise<MediaItem | null> {
+    const [artist, title] = splitTitle(text);
+    return createMediaItemFromArtistAndTitle(artist, title);
+}
+
+export async function createMediaItemFromArtistAndTitle(
+    artist = '',
+    title = ''
+): Promise<MediaItem | null> {
+    if (artist && title) {
+        const lookupItem: MediaItem = {
+            title,
+            artists: [artist],
+            src: '',
+            itemType: ItemType.Media,
+            mediaType: MediaType.Audio,
+            duration: 0,
+            playedAt: 0,
+        };
+        const foundItem = await addMetadata(lookupItem);
+        if (foundItem === lookupItem) {
+            return null;
+        } else {
+            return foundItem;
+        }
+    } else {
+        return null;
+    }
+}
+
+function splitTitle(title: string): [string, string] | [] {
+    // From web-scrobbler.
+    // https://github.com/web-scrobbler/web-scrobbler/blob/master/src/core/content/util.ts
+    const ytTitleRegExps = [
+        // Artist "Track", Artist: "Track", Artist - "Track", etc.
+        {
+            pattern: /(.+?)([\s:—-])+\s*"(.+?)"/,
+            groups: {artist: 1, track: 3},
+        },
+        // Artist「Track」 (Japanese tracks)
+        {
+            pattern: /(.+?)[『｢「](.+?)[」｣』]/,
+            groups: {artist: 1, track: 2},
+        },
+        // Track (... by Artist)
+        {
+            pattern: /(\w[\s\w]*?)\s+\([^)]*\s*by\s*([^)]+)+\)/,
+            groups: {artist: 2, track: 1},
+        },
+    ];
+    const trim = (text: string): string => {
+        return text.trim().replace(/^"|"$/g, '').trim();
+    };
+    for (const regExp of ytTitleRegExps) {
+        const match = regExp.pattern.exec(title);
+        if (match) {
+            const artist = match[regExp.groups.artist];
+            const title = match[regExp.groups.track];
+            return [trim(artist), trim(title)];
+        }
+    }
     const separators = '-\u2013\u2014/|:~'
         .split('')
         .map((separator) => [
@@ -123,23 +183,10 @@ export async function createMediaItemFromTitle(title: string): Promise<MediaItem
     for (const separator of separators) {
         if (title.includes(separator)) {
             const [artist, ...rest] = title.split(separator);
-            const lookupItem: MediaItem = {
-                src: '',
-                itemType: ItemType.Media,
-                title: rest.join(separator).trim(),
-                artists: [artist.trim()],
-                duration: 0,
-                playedAt: 0,
-            };
-            const foundItem = await addMetadata(lookupItem);
-            if (foundItem === lookupItem) {
-                return null;
-            } else {
-                return foundItem;
-            }
+            return [trim(artist), trim(rest.join(separator))];
         }
     }
-    return null;
+    return [];
 }
 
 export async function createMediaItemFromUrl(

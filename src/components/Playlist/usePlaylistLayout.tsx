@@ -122,11 +122,11 @@ function RowIcon(item: PlaylistItem) {
 }
 
 function RowTitle(item: PlaylistItem) {
-    const {title, artists} = item;
+    const {title, artists, linearType} = item;
     return (
         <span className="row-title">
             <span className="row-title-text text">
-                {artists?.length ? (
+                {artists?.length && !linearType ? (
                     <>
                         <span className="artist-text">{artists.join('/')}</span>
                         <span role="separator">-</span>
@@ -143,5 +143,5 @@ function RowTitle(item: PlaylistItem) {
 }
 
 function Duration(item: PlaylistItem) {
-    return <Time className="text" time={item.duration} />;
+    return <Time className="text" time={item.duration} asDuration />;
 }

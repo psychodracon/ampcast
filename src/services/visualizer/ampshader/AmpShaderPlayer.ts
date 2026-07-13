@@ -43,7 +43,7 @@ export default class AmpShaderPlayer extends AbstractVisualizerPlayer<AmpShaderV
     #color = '';
 
     constructor({context, source}: AudioManager, name = '') {
-        super();
+        super('ampshader');
 
         if (name === 'visualizer-ampshader') {
             this.logger = new Logger('AmpShaderPlayer');
@@ -52,8 +52,8 @@ export default class AmpShaderPlayer extends AbstractVisualizerPlayer<AmpShaderV
         this.source = source;
         this.analyser = context.createAnalyser();
 
+        this.canvas.className = `${name} visualizer`;
         this.canvas.hidden = true;
-        this.canvas.className = `visualizer ${name}`;
         this.outputGl = this.canvas.getContext('2d')!;
 
         if (window.OffscreenCanvas) {
@@ -343,6 +343,8 @@ export default class AmpShaderPlayer extends AbstractVisualizerPlayer<AmpShaderV
         this.renderFrame();
         if (this.autoplay && !this.hidden) {
             this.animationFrameId = requestAnimationFrame(() => this.render());
+        } else {
+            this.animationFrameId = 0;
         }
     }
 

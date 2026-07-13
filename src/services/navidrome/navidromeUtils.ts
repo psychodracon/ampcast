@@ -7,12 +7,13 @@ import MediaArtist from 'types/MediaArtist';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
+import MediaServiceId from 'types/MediaServiceId';
 import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import PlaybackType from 'types/PlaybackType';
 import SortParams from 'types/SortParams';
 import Thumbnail from 'types/Thumbnail';
-import {getMediaObjectId, getTextFromHtml} from 'utils';
+import {checkVersion, getMediaObjectId, getTextFromHtml} from 'utils';
 import {MAX_DURATION} from 'services/constants';
 import SimplePager from 'services/pagers/SimplePager';
 import WrappedPager from 'services/pagers/WrappedPager';
@@ -20,6 +21,10 @@ import pinStore from 'services/pins/pinStore';
 import stationStore from 'services/internetRadio/stationStore';
 import NavidromeIndexedPager, {NavidromePlaylistItemsPager} from './NavidromeIndexedPager';
 import navidromeSettings from './navidromeSettings';
+import {navidromeAlbumsSortMap, navidromeArtistAlbumsSort} from './navidromeSorting';
+import {subsonicService} from './subsonicApi';
+
+const serviceId: MediaServiceId = 'navidrome';
 
 export function createMediaObject<T extends MediaObject>(
     itemType: T['itemType'],
@@ -48,24 +53,22 @@ export function createMediaObject<T extends MediaObject>(
 
 export function createArtistAlbumsPager(
     artist: MediaArtist,
-    albumSort?: SortParams
+    {sortBy, sortOrder} = navidromeArtistAlbumsSort.defaultSort
 ): Pager<MediaAlbum> {
     const id = getMediaObjectId(artist);
+    const topTracks = createArtistTopTracks(artist);
+    const topTracksPager = new SimplePager([topTracks]);
+    const radios = createArtistRadios(artist);
     const allTracks = createArtistAllTracks(artist);
-    const allTracksPager = new SimplePager<MediaAlbum>([allTracks]);
+    const otherTracksPager = new SimplePager<MediaAlbum>(
+        checkVersion(navidromeSettings.serverVersion, '0.56.0') ? [allTracks, radios] : [radios]
+    );
     const albumsPager = new NavidromeIndexedPager<MediaAlbum>(ItemType.Album, 'album', {
         album_artist_id: id,
-        ...(albumSort
-            ? {
-                  _sort: albumSort.sortBy,
-                  _order: albumSort.sortOrder === -1 ? 'DESC' : 'ASC',
-              }
-            : {
-                  _sort: 'minYear',
-                  _order: 'DESC',
-              }),
+        _sort: navidromeAlbumsSortMap[sortBy] || sortBy,
+        _order: sortOrder === -1 ? 'DESC' : 'ASC',
     });
-    return new WrappedPager(undefined, albumsPager, allTracksPager);
+    return new WrappedPager(topTracksPager, albumsPager, otherTracksPager);
 }
 
 export function createPlaylistItemsPager(
@@ -81,7 +84,7 @@ function createMediaItem(song: Navidrome.Song): MediaItem {
         itemType: ItemType.Media,
         mediaType: MediaType.Audio,
         playbackType: PlaybackType.Direct,
-        src: `navidrome:audio:${id}`,
+        src: `${serviceId}:audio:${id}`,
         externalUrl: getExternalUrl(`album/${song.albumId}`),
         title: song.title,
         addedAt: parseDate(song.createdAt),
@@ -118,7 +121,7 @@ function createMediaItem(song: Navidrome.Song): MediaItem {
 }
 
 function createRadioStation(radio: Navidrome.Radio): MediaItem {
-    const src = `navidrome:radio:${radio.id}`;
+    const src = `${serviceId}:radio:${radio.id}`;
     return {
         src,
         itemType: ItemType.Media,
@@ -139,7 +142,7 @@ function createMediaAlbum(album: Navidrome.Album): MediaAlbum {
     const album_id = album.id;
     return {
         itemType: ItemType.Album,
-        src: `navidrome:album:${album_id}`,
+        src: `${serviceId}:album:${album_id}`,
         externalUrl: getExternalUrl(`album/${album_id}`),
         title: album.name,
         addedAt: parseDate(album.createdAt),
@@ -160,18 +163,16 @@ function createMediaAlbum(album: Navidrome.Album): MediaAlbum {
 
 function createMediaArtist(artist: Navidrome.Artist, albumSort?: SortParams): MediaArtist {
     const artist_id = artist.id;
-    const hasThumbnails = Object.keys(artist).some((key) => /ImageUrl$/.test(key));
-
     const mediaArtist: Writable<SetOptional<MediaArtist, 'pager'>> = {
         itemType: ItemType.Artist,
-        src: `navidrome:artist:${artist_id}`,
+        src: `${serviceId}:artist:${artist_id}`,
         externalUrl: getExternalUrl(`artist/${artist_id}`),
         title: artist.name,
         description: getTextFromHtml(artist.biography) || undefined,
         inLibrary: !!artist.starred,
         rating: artist.rating || 0,
         genres: artist.genres?.map((genre) => genre.name),
-        thumbnails: hasThumbnails ? createThumbnails(artist_id) : undefined,
+        thumbnails: createThumbnails(artist_id),
         artist_mbid: artist.mbzArtistId,
     };
     mediaArtist.pager = createArtistAlbumsPager(mediaArtist as MediaArtist, albumSort);
@@ -180,7 +181,7 @@ function createMediaArtist(artist: Navidrome.Artist, albumSort?: SortParams): Me
 
 function createMediaPlaylist(playlist: Navidrome.Playlist, itemSort?: SortParams): MediaPlaylist {
     const playlist_id = playlist.id;
-    const src = `navidrome:playlist:${playlist_id}`;
+    const src = `${serviceId}:playlist:${playlist_id}`;
     const owned = playlist.ownerId === navidromeSettings.userId;
     const smart = !!playlist.rules;
 
@@ -234,22 +235,70 @@ function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
     const id = getMediaObjectId(artist);
     return {
         itemType: ItemType.Album,
-        src: `navidrome:all-tracks:${id}`,
+        src: `${serviceId}:all-tracks:${id}`,
         title: 'All Songs',
         artist: artist.title,
         thumbnails: artist.thumbnails,
-        pager: createAllTracksPager(artist),
+        pager: createArtistAllTracksPager(artist),
         trackCount: undefined,
         synthetic: true,
     };
 }
 
-function createAllTracksPager(artist: MediaArtist): Pager<MediaItem> {
+function createArtistAllTracksPager(artist: MediaArtist): Pager<MediaItem> {
     const id = getMediaObjectId(artist);
-    return new NavidromeIndexedPager<MediaItem>(ItemType.Media, 'song', {
-        artist_id: id,
-        _sort: 'artist',
-    });
+    return new NavidromeIndexedPager<MediaItem>(
+        ItemType.Media,
+        'song',
+        {
+            artists_id: id, // Doesn't work prior to v0.56.0.
+            _sort: 'album',
+        },
+        {autofill: true}
+    );
+}
+
+function createArtistRadios(artist: MediaArtist): MediaAlbum {
+    const id = getMediaObjectId(artist);
+    const src = `${serviceId}:artist-radio:${id}`;
+    const radio: MediaItem = {
+        src,
+        title: `${artist.title} - Radio`,
+        itemType: ItemType.Media,
+        mediaType: MediaType.Audio,
+        linearType: LinearType.Station,
+        playbackType: PlaybackType.Direct,
+        duration: MAX_DURATION,
+        thumbnails: artist.thumbnails,
+        playedAt: 0,
+        skippable: true,
+        isFavoriteStation: stationStore.isFavorite({src}),
+        synthetic: true,
+    };
+    return {
+        itemType: ItemType.Album,
+        src: `${serviceId}:radios:${id}`,
+        title: 'Radios',
+        artist: artist.title,
+        thumbnails: artist.thumbnails,
+        pager: new SimplePager([radio]),
+        trackCount: undefined,
+        synthetic: true,
+    };
+}
+
+function createArtistTopTracks(artist: MediaArtist): MediaAlbum {
+    const id = getMediaObjectId(artist);
+    return {
+        itemType: ItemType.Album,
+        src: `${serviceId}:top-tracks:${id}`,
+        title: 'Top Songs',
+        artist: artist.title,
+        thumbnails: artist.thumbnails,
+        pager: subsonicService.createTopTracksPager(artist.title),
+        trackCount: undefined,
+        synthetic: true,
+    };
 }
 
 function getExternalUrl(id: string): string {

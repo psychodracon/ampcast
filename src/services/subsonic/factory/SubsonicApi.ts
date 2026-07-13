@@ -4,15 +4,16 @@ import {Primitive} from 'type-fest';
 import FilterType from 'types/FilterType';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
+import Lyrics from 'types/Lyrics';
 import MediaFilter from 'types/MediaFilter';
+import MediaItem from 'types/MediaItem';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
 import PersonalMediaServerSettings from 'types/PersonalMediaServerSettings';
-import PlayableItem from 'types/PlayableItem';
 import PlaybackType from 'types/PlaybackType';
 import type SubsonicSettings from './SubsonicSettings';
-import {Logger, chunk, shuffle} from 'utils';
+import {Logger, chunk, getMediaObjectId, shuffle} from 'utils';
 import {createMediaItemFromUrl} from 'services/metadata';
 
 const logger = new Logger('SubsonicApi');
@@ -24,11 +25,18 @@ export interface SubsonicApiSettings extends Partial<PersonalMediaServerSettings
 
 export default class SubsonicApi {
     private genres: readonly MediaFilter[] | undefined;
+    #openSubsonic: Record<Subsonic.OpenSubsonicExtensionName, boolean | undefined> | undefined;
 
     constructor(
         private readonly serviceId: MediaServiceId,
         private readonly settings: SubsonicApiSettings
     ) {}
+
+    get openSubsonic():
+        | Record<Subsonic.OpenSubsonicExtensionName, boolean | undefined>
+        | undefined {
+        return this.#openSubsonic;
+    }
 
     async get<T>(
         path: string,
@@ -98,7 +106,10 @@ export default class SubsonicApi {
     }
 
     async removeFromPlaylist(playlistId: string, indexes: readonly number[]): Promise<void> {
-        const chunks = chunk(indexes.toSorted((a, b) => a - b), 300).reverse();
+        const chunks = chunk(
+            indexes.toSorted((a, b) => a - b),
+            300
+        ).reverse();
         for (const chunk of chunks) {
             const params = new URLSearchParams({playlistId});
             chunk.forEach((index) => params.append('songIndexToRemove', String(index)));
@@ -186,6 +197,14 @@ export default class SubsonicApi {
     async getArtistInfo(id: string): Promise<Subsonic.ArtistInfo> {
         const data = await this.get<{artistInfo2: Subsonic.ArtistInfo}>('getArtistInfo2', {id});
         return data.artistInfo2;
+    }
+
+    async getArtistRadioTracks(id: string, count = 200): Promise<Subsonic.MediaItem[]> {
+        const data = await this.get<{similarSongs2: {song: Subsonic.MediaItem[]}}>(
+            'getSimilarSongs2',
+            {id, count}
+        );
+        return data.similarSongs2.song || [];
     }
 
     async getArtistTopTracks(artist: string, count = 50): Promise<Subsonic.MediaItem[]> {
@@ -288,6 +307,20 @@ export default class SubsonicApi {
         return data.starred2.song || [];
     }
 
+    async getLyrics(item: MediaItem): Promise<Lyrics | null> {
+        if (this.openSubsonic?.songLyrics) {
+            try {
+                const lyrics = await this.getLyricsBySongId(item);
+                if (lyrics) {
+                    return lyrics;
+                }
+            } catch (err) {
+                logger.error(err);
+            }
+        }
+        return this.getLyricsByArtistAndTitle(item);
+    }
+
     async getMostPlayed(offset: number, size: number): Promise<Subsonic.Album[]> {
         return this.getAlbumList({type: 'frequent', size, offset});
     }
@@ -326,11 +359,15 @@ export default class SubsonicApi {
         );
     }
 
-    getPlayableUrl(item: PlayableItem): string {
+    getPlayableUrl(item: MediaItem): string {
         const {host, credentials} = this.settings;
         if (host && credentials) {
-            if (item.linearType) {
-                return item.srcs![0]; // Let this throw
+            if (item.linearType === LinearType.Station) {
+                const url = item.srcs?.[0];
+                if (!url) {
+                    throw Error('No radio stream URL');
+                }
+                return url;
             } else {
                 const [, type, id] = item.src.split(':');
                 if (item.playbackType === PlaybackType.HLS) {
@@ -348,12 +385,15 @@ export default class SubsonicApi {
         }
     }
 
-    async getPlaybackType(item: PlayableItem): Promise<PlaybackType> {
+    async getPlaybackType(item: MediaItem): Promise<PlaybackType> {
         if (item.playbackType !== undefined) {
             return item.playbackType;
         }
         if (item.linearType === LinearType.Station) {
-            const url = item.srcs![0]; // Let this throw
+            const url = item.srcs?.[0];
+            if (!url) {
+                throw Error('No radio stream URL');
+            }
             const mediaItem = await createMediaItemFromUrl(url);
             return mediaItem.playbackType || PlaybackType.Direct;
         }
@@ -406,10 +446,14 @@ export default class SubsonicApi {
 
     async getServerInfo(): Promise<Record<string, string>> {
         const data = await this.ping();
+        if (!this.#openSubsonic && data.openSubsonic) {
+            this.#openSubsonic = await this.getOpenSubsonicExtensions();
+        }
         return {
             'Server type': data.type || '',
             'Server version': data.serverVersion || '',
             'Subsonic version': data.version || '',
+            OpenSubsonic: String(!!data.openSubsonic),
         };
     }
 
@@ -506,12 +550,19 @@ export default class SubsonicApi {
     async ping(
         host = this.settings.host,
         credentials = this.settings.credentials
-    ): Promise<Subsonic.PingResponse> {
-        return this.get<Subsonic.PingResponse>('ping', undefined, {host, credentials});
+    ): Promise<Subsonic.Ping> {
+        return this.get<Subsonic.Ping>('ping', undefined, {host, credentials});
     }
 
-    async scrobble(params: Subsonic.ScrobbleParams): Promise<Response> {
-        return this.get('scrobble', params as any);
+    async reportPlayback(params: Subsonic.ReportPlaybackParams): Promise<void> {
+        if (!this.openSubsonic?.playbackReport) {
+            throw Error('Not supported');
+        }
+        await this.get('reportPlayback', params as any);
+    }
+
+    async scrobble(params: Subsonic.ScrobbleParams): Promise<void> {
+        await this.get('scrobble', params as any);
     }
 
     async searchSongs(
@@ -568,5 +619,58 @@ export default class SubsonicApi {
             musicFolderId ? {...params, musicFolderId} : params
         );
         return data.albumList2.album || [];
+    }
+
+    private async getLyricsByArtistAndTitle(item: MediaItem): Promise<Lyrics | null> {
+        const {artists: [artist = ''] = [], title} = item;
+        if (artist && title) {
+            const data = await this.get<{lyrics?: Subsonic.Lyrics}>('getLyrics', {artist, title});
+            const text = data.lyrics?.value;
+            if (text) {
+                return {plain: text.split(/\n/)};
+            }
+        }
+        return null;
+    }
+
+    private async getLyricsBySongId(item: MediaItem): Promise<Lyrics | null> {
+        if (!this.openSubsonic?.songLyrics) {
+            throw Error('Not supported');
+        }
+        const id = getMediaObjectId(item);
+        const data = await this.get<{lyricsList: Subsonic.LyricsList}>('getLyricsBySongId', {id});
+        const lyrics = data.lyricsList.structuredLyrics?.filter((lyrics) => lyrics.synced)[0];
+        if (lyrics) {
+            const lines = lyrics.line;
+            if (lyrics.synced) {
+                const synced: Lyrics['synced'] = lines.map((line, index) => {
+                    const nextLine = lines[index + 1];
+                    return {
+                        startTime: (line.start || 0) / 1000,
+                        endTime: (nextLine?.start || 0) / 1000,
+                        text: line.value || '',
+                    };
+                });
+                const plain = synced.map((line) => line.text);
+                return {plain, synced};
+            } else {
+                return {plain: lines.map((line) => line.value || '')};
+            }
+        }
+        return null;
+    }
+
+    private async getOpenSubsonicExtensions(): Promise<Record<string, boolean | undefined>> {
+        try {
+            const data = await this.get<{
+                openSubsonicExtensions: Subsonic.OpenSubsonicExtension[];
+            }>('getOpenSubsonicExtensions');
+            const extensions: Record<string, boolean | undefined> = {};
+            data.openSubsonicExtensions.forEach((extension) => (extensions[extension.name] = true));
+            return extensions;
+        } catch (err) {
+            logger.error(err);
+            return {};
+        }
     }
 }

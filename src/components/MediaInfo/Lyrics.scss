@@ -1,0 +1,52 @@
+.lyrics {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+
+    &-not-available {
+        text-align: center;
+    }
+
+    .text-box {
+        flex: auto;
+        max-height: 100%;
+        line-height: 1.5;
+        font-family: system-ui;
+        font-style: italic;
+        margin-bottom: 1em;
+
+        .scrollable {
+            --scrollbar-width: max(10px, calc(1em * var(--scrollbar-size)));
+        }
+
+        p {
+            margin: 0;
+
+            &:empty {
+                margin-top: 1em;
+            }
+        }
+
+        & ~ p {
+            margin: 0;
+        }
+    }
+
+    .external-view {
+        font-size: max(9px, 0.75em);
+
+        & + .synced-available {
+            margin-top: 0.25em;
+        }
+    } 
+
+    .synced-available {
+        font-style: italic;
+        font-size: max(8px, 0.625em);
+    }
+
+    .error-box {
+        border: 0;
+        padding: 0;
+    }
+}

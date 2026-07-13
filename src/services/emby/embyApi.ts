@@ -7,13 +7,13 @@ import type {
 import {Primitive} from 'type-fest';
 import FilterType from 'types/FilterType';
 import ItemType from 'types/ItemType';
+import Lyrics from 'types/Lyrics';
 import MediaFilter from 'types/MediaFilter';
 import MediaItem from 'types/MediaItem';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaType from 'types/MediaType';
 import {Page} from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
-import PlayableItem from 'types/PlayableItem';
 import PlaybackType from 'types/PlaybackType';
 import {
     canPlayNativeHls,
@@ -213,6 +213,43 @@ async function getEndpointInfo(settings: EmbySettings = embySettings): Promise<E
     return info;
 }
 
+interface TrackEvent {
+    readonly EndPositionTicks: number;
+    readonly StartPositionTicks: number;
+    readonly Text: string;
+}
+
+async function getLyrics(id: string): Promise<Lyrics | null> {
+    const item = await get<BaseItemDto>(`Users/${embySettings.userId}/Items/${id}`);
+    const mediaSource = item.MediaSources?.[0];
+    if (mediaSource) {
+        const track = mediaSource.MediaStreams?.filter(
+            (stream) =>
+                stream.Type === 'Subtitle' &&
+                stream.Index === mediaSource.DefaultSubtitleStreamIndex
+        )[0];
+        if (track) {
+            const data = await get<{TrackEvents: readonly TrackEvent[]}>(
+                `Items/${id}/${mediaSource.Id}/Subtitles/${track.Index}/Stream.js`
+            );
+            const lines = data.TrackEvents;
+            if (lines?.length) {
+                const lyrics: Lyrics['synced'] = lines.map((line) => {
+                    return {
+                        startTime: (line.StartPositionTicks || 0) / 10_000_000,
+                        endTime: (line.EndPositionTicks || 0) / 10_000_000,
+                        text: line.Text || '',
+                    };
+                });
+                const plain = lyrics.map((line) => line.text);
+                const synced = lyrics.filter((line) => line.startTime !== line.endTime);
+                return {plain, synced: synced.length ? synced : undefined};
+            }
+        }
+    }
+    return null;
+}
+
 async function getMusicLibraries(
     settings: EmbySettings = embySettings
 ): Promise<readonly PersonalMediaLibrary[]> {
@@ -309,7 +346,7 @@ async function embyFetch(
     return response;
 }
 
-function getPlayableUrl(item: PlayableItem, settings: EmbySettings = embySettings): string {
+function getPlayableUrl(item: MediaItem, settings: EmbySettings = embySettings): string {
     const {apiHost, userId, token, deviceId} = settings;
     if (apiHost && userId && token && deviceId) {
         const [, type, id, mediaSourceId] = item.src.split(':');
@@ -403,6 +440,7 @@ const embyApi = {
     getPage,
     getFilters,
     getEndpointInfo,
+    getLyrics,
     getMusicLibraries,
     getPlayableUrl,
     getPlaybackType,

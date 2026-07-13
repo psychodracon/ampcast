@@ -9,18 +9,18 @@ import {
     switchMap,
     of,
 } from 'rxjs';
-import AudioManager from 'types/AudioManager';
 import Player from 'types/Player';
 import PlaylistItem from 'types/PlaylistItem';
 
 export type CanPlay<T> = (src: T) => boolean;
 
-export default class OmniPlayer<T, S = T> implements Player<T> {
-    private readonly element = document.createElement('div');
-    private readonly player$ = new BehaviorSubject<Player<S> | null>(null);
+export default class OmniPlayer<T> implements Player<T> {
+    private readonly players: Player<T>[] = [];
+    private readonly player$ = new BehaviorSubject<Player<T> | null>(null);
     private readonly error$ = new Subject<unknown>();
     private stopped = true;
-    #players: Map<Player<S>, CanPlay<T>> = new Map();
+    private silent = true;
+    #element: HTMLElement = document.createElement('div');
     #loadError: Error | null = null;
     #autoplay = false;
     #loop = false;
@@ -29,12 +29,11 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
     #width = 0;
     #height = 0;
 
-    constructor(
-        id: string,
-        private readonly mapSrc: (src: T) => S = (src) => src as unknown as S,
-        private readonly audio?: Pick<AudioManager, 'volume'>
-    ) {
+    constructor(id: string, players: Player<T>[] = []) {
         this.element.id = id;
+        for (const player of players) {
+            this.addPlayer(player);
+        }
     }
 
     get autoplay(): boolean {
@@ -82,9 +81,6 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
             if (this.currentPlayer) {
                 this.currentPlayer.muted = muted;
             }
-            if (this.audio) {
-                this.audio.volume = muted ? 0 : this.volume;
-            }
         }
     }
 
@@ -98,63 +94,96 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
             for (const player of this.players) {
                 player.volume = volume;
             }
-            if (this.audio) {
-                this.audio.volume = this.muted ? 0 : volume;
-            }
         }
+    }
+
+    observeCanSkipNext(): Observable<boolean> {
+        return this.observeCurrentPlayer().pipe(
+            switchMap((player) => player?.observeCanSkipNext?.() ?? of(false)),
+            filter(() => !this.silent)
+        );
+    }
+
+    observeCanSkipPrev(): Observable<boolean> {
+        return this.observeCurrentPlayer().pipe(
+            switchMap((player) => player?.observeCanSkipPrev?.() ?? of(false)),
+            filter(() => !this.silent)
+        );
     }
 
     observeCurrentTime(): Observable<number> {
         return this.observeCurrentPlayer().pipe(
             switchMap((player) => (player ? player.observeCurrentTime() : EMPTY)),
-            distinctUntilChanged()
+            filter(() => !this.silent)
         );
     }
 
     observeDuration(): Observable<number> {
         // Make sure this re-emits when a new item is loaded.
         return this.player$.pipe(
-            switchMap((player) =>
-                player ? player.observeDuration().pipe(distinctUntilChanged()) : EMPTY
-            )
+            switchMap((player) => (player ? player.observeDuration() : EMPTY)),
+            filter(() => !this.silent)
         );
     }
 
     observeEnded(): Observable<void> {
         return this.observeCurrentPlayer().pipe(
-            switchMap((player) => (player ? player.observeEnded() : EMPTY))
+            switchMap((player) => (player ? player.observeEnded() : EMPTY)),
+            filter(() => !this.silent)
         );
     }
 
     observeError(): Observable<unknown> {
         return this.observeCurrentPlayer().pipe(
             switchMap((player) => (player ? merge(this.error$, player.observeError()) : EMPTY)),
-            filter(() => !this.stopped)
+            filter(() => !this.silent && !this.stopped)
         );
     }
 
     observeNowPlaying(station: PlaylistItem): Observable<PlaylistItem> {
         return this.observeCurrentPlayer().pipe(
-            switchMap((player) => player?.observeNowPlaying?.(station) || of(station)),
-            distinctUntilChanged()
+            switchMap((player) => player?.observeNowPlaying?.(station) ?? of(station)),
+            distinctUntilChanged(),
+            filter(() => !this.silent)
         );
     }
 
     observePlaying(): Observable<void> {
         return this.observeCurrentPlayer().pipe(
-            switchMap((player) => (player ? player.observePlaying() : EMPTY))
+            switchMap((player) => (player ? player.observePlaying() : EMPTY)),
+            filter(() => !this.silent)
         );
+    }
+
+    addPlayer(player: Player<T>): void {
+        if (!this.players.includes(player)) {
+            player.muted = true;
+            player.hidden = true;
+            player.autoplay = false;
+            player.loop = this.loop;
+            player.volume = this.volume;
+            if (this.#width * this.#height > 0) {
+                player.resize(this.#width, this.#height);
+            }
+            player.appendTo(this.element);
+            this.players.push(player);
+        }
     }
 
     appendTo(parentElement: HTMLElement): void {
         parentElement.appendChild(this.element);
     }
 
-    load(src: T): void {
+    canPlay(src: T): boolean {
+        return this.players.some((player) => player.canPlay(src));
+    }
+
+    load(src: T | null): void {
         const prevPlayer = this.currentPlayer;
         const nextPlayer = this.selectPlayer(src);
 
-        this.player$.next(null); // turn off event streams
+        this.loadError = null;
+        this.silent = true; // turn off event streams
 
         if (prevPlayer && prevPlayer !== nextPlayer) {
             prevPlayer.autoplay = false;
@@ -167,21 +196,18 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
             this.stopped = false;
         }
 
-        this.loadError = null;
-
-        if (nextPlayer && !this.#players.has(nextPlayer)) {
-            this.loadError = Error('Player not registered');
-            return;
-        }
-
-        this.player$.next(nextPlayer); // turn on event streams
+        this.player$.next(nextPlayer);
+        this.silent = false; // turn on event streams
 
         if (nextPlayer) {
             try {
-                nextPlayer.autoplay = this.autoplay;
-                nextPlayer.load(this.mapSrc(src));
-                nextPlayer.muted = this.muted;
-                nextPlayer.hidden = this.hidden;
+                // `validate` throws if `src` is not valid.
+                if (this.validate(src)) {
+                    nextPlayer.autoplay = this.autoplay;
+                    nextPlayer.load(src);
+                    nextPlayer.muted = this.muted;
+                    nextPlayer.hidden = this.hidden;
+                }
             } catch (err: any) {
                 this.loadError = Error(err?.message || 'Failed to load');
             }
@@ -192,15 +218,18 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
 
     loadNext(src: T | null): void {
         try {
-            const nextPlayer = src ? this.selectPlayer(src) : null;
-            nextPlayer?.loadNext?.(this.mapSrc(src!));
-            for (const player of this.players) {
-                if (player !== nextPlayer) {
-                    player.loadNext?.(null);
+            // `validate` throws if `src` is not valid.
+            if (this.validate(src)) {
+                const nextPlayer = src ? this.selectPlayer(src) : null;
+                nextPlayer?.loadNext?.(src);
+                for (const player of this.players) {
+                    if (player !== nextPlayer) {
+                        player.loadNext?.(null);
+                    }
                 }
             }
-        } catch (err) {
-            console.error(err);
+        } catch {
+            // Ignore.
         }
     }
 
@@ -247,50 +276,20 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
         }
     }
 
-    registerPlayer(player: Player<S>, canPlay: CanPlay<T>): void {
-        if (!this.#players.has(player)) {
-            player.muted = true;
-            player.hidden = true;
-            player.autoplay = false;
-            player.loop = this.loop;
-            player.volume = this.volume;
-            if (this.#width * this.#height > 0) {
-                player.resize(this.#width, this.#height);
-            }
-            player.appendTo(this.element);
-            this.#players.set(player, canPlay);
-        }
-    }
-
-    registerPlayers(players: [Player<S>, CanPlay<T>][]): void {
-        for (const [player, canPlay] of players) {
-            this.registerPlayer(player, canPlay);
-        }
-    }
-
-    selectPlayer(src: T): Player<S> | null {
+    selectPlayer(src: T | null): Player<T> | null {
         // Test most recent entries first.
-        // > The Map object holds key-value pairs and remembers the original insertion order of the keys.
-        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map
-        const entries = [...this.#players.entries()].reverse();
-        for (const [player, canPlay] of entries) {
-            if (canPlay(src)) {
-                return player;
-            }
-        }
-        return null;
+        return src ? (this.players.findLast((player) => player.canPlay(src)) ?? null) : null;
     }
 
-    unregisterPlayer(player: Player<S>): void {
-        if (this.#players.has(player)) {
-            if (this.currentPlayer === player) {
-                this.stop();
-            }
-            this.#players.delete(player);
+    useElement(element: HTMLElement): void {
+        element.hidden = this.hidden;
+        for (const player of this.players) {
+            player.appendTo(element);
         }
+        this.#element = element;
     }
 
-    protected get currentPlayer(): Player<S> | null {
+    protected get currentPlayer(): Player<T> | null {
         return this.player$.value;
     }
 
@@ -305,11 +304,19 @@ export default class OmniPlayer<T, S = T> implements Player<T> {
         }
     }
 
-    protected get players(): IterableIterator<Player<S>> {
-        return this.#players.keys();
+    protected observeCurrentPlayer(): Observable<Player<T> | null> {
+        return this.player$.pipe(distinctUntilChanged());
     }
 
-    protected observeCurrentPlayer(): Observable<Player<S> | null> {
-        return this.player$.pipe(distinctUntilChanged());
+    protected validate(src: T | null): src is T {
+        // Throw if `src` is not valid.
+        if (!src) {
+            throw Error('No source');
+        }
+        return true;
+    }
+
+    private get element(): HTMLElement {
+        return this.#element;
     }
 }

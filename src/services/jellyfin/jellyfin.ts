@@ -3,6 +3,8 @@ import Action from 'types/Action';
 import CreatePlaylistOptions from 'types/CreatePlaylistOptions';
 import FilterType from 'types/FilterType';
 import ItemType from 'types/ItemType';
+import LinearType from 'types/LinearType';
+import Lyrics from 'types/Lyrics';
 import MediaFilter from 'types/MediaFilter';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
@@ -12,7 +14,6 @@ import MediaSource from 'types/MediaSource';
 import Pager, {PagerConfig} from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
 import PersonalMediaService from 'types/PersonalMediaService';
-import PlayableItem from 'types/PlayableItem';
 import PlaybackType from 'types/PlaybackType';
 import Pin, {Pinnable} from 'types/Pin';
 import ServiceType from 'types/ServiceType';
@@ -35,11 +36,12 @@ import {
 import jellyfinSettings from './jellyfinSettings';
 import JellyfinPager from './JellyfinPager';
 import jellyfinApi from './jellyfinApi';
+import {jellyfinPlaylistItemsSort} from './jellyfinSorting';
 import jellyfinSources, {
     createItemsPager,
     createSearchPager,
     jellyfinEditablePlaylists,
-    jellyfinPlaylistItemsSort,
+    jellyfinPlaylistLayout,
     jellyfinSearch,
 } from './jellyfinSources';
 import {createPlaylistItemsPager} from './jellyfinUtils';
@@ -86,9 +88,11 @@ const jellyfin: PersonalMediaService = {
     canStore,
     compareForRating,
     createPlaylist,
+    createRadioPager,
     createSourceFromPin,
     editPlaylist,
     getFilters,
+    getLyrics,
     getMediaObject,
     getPlayableUrl,
     getPlaybackType,
@@ -113,9 +117,12 @@ function canPin(item: MediaObject): boolean {
 }
 
 function canStore<T extends MediaObject>(item: T): boolean {
+    if (item.synthetic) {
+        return false;
+    }
     switch (item.itemType) {
-        case ItemType.Album:
-            return !item.synthetic;
+        case ItemType.Media:
+            return item.linearType !== LinearType.Station;
 
         case ItemType.Folder:
             return false;
@@ -151,6 +158,14 @@ async function createPlaylist<T extends MediaItem>(
     };
 }
 
+function createRadioPager(item: MediaItem): Pager<MediaItem> {
+    const [, type, id] = item.src.split(':');
+    if (type !== 'artist-radio') {
+        throw Error('Not supported');
+    }
+    return new JellyfinPager(`Items/${id}/InstantMix`, {UserId: jellyfinSettings.userId});
+}
+
 async function editPlaylist(playlist: MediaPlaylist): Promise<MediaPlaylist> {
     await jellyfinApi.editPlaylist(playlist);
     return playlist;
@@ -167,7 +182,12 @@ function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
         sourceId: `${serviceId}/pinned-playlist`,
         icon: 'pin',
         isPin: true,
-        secondaryItems: {sort: jellyfinPlaylistItemsSort},
+        primaryItems: {
+            layout: jellyfinPlaylistLayout,
+        },
+        secondaryItems: {
+            sort: jellyfinPlaylistItemsSort,
+        },
 
         search(): Pager<MediaPlaylist> {
             return createItemsPager(
@@ -177,7 +197,7 @@ function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
                 },
                 {
                     childSort: jellyfinPlaylistItemsSort.defaultSort,
-                    childSortId: `${pin.src}/2`,
+                    childSortId: `${serviceId}/pinned-playlist/2`,
                 },
                 createPlaylistItemsPager
             );
@@ -190,6 +210,11 @@ async function getFilters(
     itemType: ItemType
 ): Promise<readonly MediaFilter[]> {
     return jellyfinApi.getFilters(filterType, itemType);
+}
+
+async function getLyrics(item: MediaItem): Promise<Lyrics | null> {
+    const id = getIdFromSrc(item);
+    return jellyfinApi.getLyrics(id);
 }
 
 async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
@@ -213,7 +238,7 @@ async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
     return fetchFirstItem<T>(pager, {timeout: 2000});
 }
 
-function getPlayableUrl(item: PlayableItem): string {
+function getPlayableUrl(item: MediaItem): string {
     return jellyfinApi.getPlayableUrl(item);
 }
 

@@ -26,14 +26,15 @@ export default class WaveformPlayer extends AbstractVisualizerPlayer<WaveformVis
     private currentVisualizer = '';
 
     constructor({context, source}: AudioManager, name = '') {
-        super();
+        super('waveform');
+
         if (name === 'visualizer-waveform') {
             this.logger = new Logger('WaveformPlayer');
         }
         this.source = source;
         this.analyser = context.createAnalyser();
+        this.canvas.className = `${name} visualizer`;
         this.canvas.hidden = true;
-        this.canvas.className = `visualizer ${name}`;
     }
 
     get hidden(): boolean {
@@ -107,6 +108,8 @@ export default class WaveformPlayer extends AbstractVisualizerPlayer<WaveformVis
         this.renderFrame(now);
         if (this.autoplay && !this.hidden) {
             this.animationFrameId = requestAnimationFrame((now) => this.render(now));
+        } else {
+            this.animationFrameId = 0;
         }
     }
 

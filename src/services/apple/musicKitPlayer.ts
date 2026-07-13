@@ -15,7 +15,7 @@ import {
     tap,
 } from 'rxjs';
 import LinearType from 'types/LinearType';
-import PlayableItem from 'types/PlayableItem';
+import MediaItem from 'types/MediaItem';
 import PlaylistItem from 'types/PlaylistItem';
 import Player from 'types/Player';
 import {Logger, uniqBy} from 'utils';
@@ -26,11 +26,11 @@ import {createNowPlayingItem} from './musicKitUtils';
 
 const logger = new Logger('MusicKitPlayer');
 
-export class MusicKitPlayer implements Player<PlayableItem> {
+export class MusicKitPlayer implements Player<MediaItem> {
     private player?: MusicKit.MusicKitInstance;
     private mutationObserver: MutationObserver;
     private readonly paused$ = new BehaviorSubject(true);
-    private readonly duration$ = new Subject<number>();
+    private readonly duration$ = new BehaviorSubject(0);
     private readonly currentTime$ = new Subject<number>();
     private readonly ended$ = new Subject<void>();
     private readonly playing$ = new Subject<void>();
@@ -39,7 +39,8 @@ export class MusicKitPlayer implements Player<PlayableItem> {
     >();
     private readonly error$ = new Subject<unknown>();
     private readonly element: HTMLElement;
-    private readonly item$ = new BehaviorSubject<PlayableItem | null>(null);
+    private readonly item$ = new BehaviorSubject<MediaItem | null>(null);
+    private readonly position$ = new BehaviorSubject(0);
     private loadedSrc = '';
     private hasWaited = false;
     private ended = false;
@@ -53,9 +54,9 @@ export class MusicKitPlayer implements Player<PlayableItem> {
 
     constructor() {
         const element = (this.element = document.createElement('div'));
-        element.hidden = true;
-        element.className = 'apple-video';
         element.id = 'apple-music-video-container';
+        element.className = 'apple-video';
+        element.hidden = true;
 
         // Load new tracks.
         this.observePaused()
@@ -93,6 +94,13 @@ export class MusicKitPlayer implements Player<PlayableItem> {
 
         this.observePlaying().subscribe(() => (this.ended = false));
         this.observeEnded().subscribe(() => (this.ended = true));
+
+        this.observeItem()
+            .pipe(distinctUntilChanged((a, b) => a?.src === b?.src))
+            .subscribe((item) => {
+                this.duration$.next(item?.duration || 0);
+                this.currentTime$.next(item?.startTime || 0);
+            });
 
         // Log errors.
         this.observeError().subscribe(logger.error);
@@ -151,15 +159,36 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         this.synchVolume();
     }
 
+    observeCanSkipNext(): Observable<boolean> {
+        return this.item$.pipe(
+            switchMap((item) =>
+                item?.linearType && !item.isLivePlayback
+                    ? this.position$.pipe(map((position) => position < this.size))
+                    : of(false)
+            ),
+            distinctUntilChanged()
+        );
+    }
+
+    observeCanSkipPrev(): Observable<boolean> {
+        return this.item$.pipe(
+            switchMap((item) =>
+                item?.linearType && !item.isLivePlayback
+                    ? this.position$.pipe(map((position) => position !== 0))
+                    : of(false)
+            ),
+            distinctUntilChanged()
+        );
+    }
+
     observeCurrentTime(): Observable<number> {
         return this.currentTime$.pipe(
-            distinctUntilChanged(),
             filter(() => this.player?.playbackState !== MusicKit.PlaybackStates.seeking)
         );
     }
 
     observeDuration(): Observable<number> {
-        return this.duration$.pipe(distinctUntilChanged());
+        return this.duration$;
     }
 
     observePlaying(): Observable<void> {
@@ -190,8 +219,12 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         parentElement.appendChild(this.element);
     }
 
-    load(item: PlayableItem): void {
-        logger.log('load', item.src);
+    canPlay(item: MediaItem): boolean {
+        return item.src.startsWith('apple:');
+    }
+
+    load(item: MediaItem): void {
+        logger.log('load', item.src, item.startTime || 0);
         if (this.autoplay) {
             this.stopped = false;
         }
@@ -202,13 +235,15 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         }
     }
 
-    loadNext(item: PlayableItem | null): void {
+    loadNext(item: MediaItem | null): void {
         if (this.player && item && !this.isLinear && !item.linearType) {
-            const [, , id] = item.src.split(':');
-            const queue = this.player.queue;
-            if (queue.length > 0 && queue.items[queue.position + 1]?.id !== id) {
-                const queueItem = this.getQueueItem(item);
-                this.player.playNext(queueItem).then(undefined, logger.warn);
+            const [, type, id] = item.src.split(':');
+            if (!type.includes('video')) {
+                const queue = this.player.queue;
+                if (queue.length > 0 && queue.items[queue.position + 1]?.id !== id) {
+                    const queueItem = this.getQueueItem(item);
+                    this.player.playNext(queueItem).then(undefined, logger.warn);
+                }
             }
         }
     }
@@ -269,7 +304,7 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         return !!this.item?.isLivePlayback;
     }
 
-    private get item(): PlayableItem | null {
+    private get item(): MediaItem | null {
         return this.item$.value;
     }
 
@@ -277,11 +312,15 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         return this.paused$.value;
     }
 
+    private get size(): number {
+        return this.player?.queue.length || 0;
+    }
+
     private get src(): string | undefined {
         return this.item?.src;
     }
 
-    private observeItem(): Observable<PlayableItem | null> {
+    private observeItem(): Observable<MediaItem | null> {
         return this.item$.pipe(distinctUntilChanged());
     }
 
@@ -324,7 +363,7 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         }
     }
 
-    private async loadAndPlay(item: PlayableItem): Promise<void> {
+    private async loadAndPlay(item: MediaItem): Promise<void> {
         let player = this.player;
         if (!player) {
             player = await this.createPlayer();
@@ -386,7 +425,7 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         }
     }
 
-    private getQueueItem(item: PlayableItem): MusicKit.SetQueueOptions {
+    private getQueueItem(item: MediaItem): MusicKit.SetQueueOptions {
         const [, type, id] = item.src.split(':');
 
         // "(library-)?music-videos" => "musicVideo"
@@ -438,7 +477,7 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         }
     }
 
-    protected async safeReload(item: PlayableItem): Promise<void> {
+    protected async safeReload(item: MediaItem): Promise<void> {
         if (this.isLoadedItem(item)) {
             const startTime = item.startTime || 0;
             try {
@@ -481,7 +520,7 @@ export class MusicKitPlayer implements Player<PlayableItem> {
         }
     }
 
-    private isLoadedItem(item: PlayableItem | null): boolean {
+    private isLoadedItem(item: MediaItem | null): boolean {
         if (this.player && item) {
             const [, , id] = item.src.split(':');
             if (this.isLinear) {
@@ -549,7 +588,9 @@ export class MusicKitPlayer implements Player<PlayableItem> {
                 break;
 
             case MusicKit.PlaybackStates.completed:
-                this.ended$.next();
+                if (!this.ended) {
+                    this.ended$.next();
+                }
                 break;
         }
     };
@@ -559,11 +600,13 @@ export class MusicKitPlayer implements Player<PlayableItem> {
     };
 
     private readonly onQueuePositionDidChange: any = ({
+        position,
         oldPosition,
     }: {
-        oldPosition: number;
         position: number;
+        oldPosition: number;
     }) => {
+        this.position$.next(position);
         if (oldPosition !== -1 && !this.skipping && !this.isLinear) {
             this.ended$.next();
         }

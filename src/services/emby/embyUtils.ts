@@ -1,6 +1,7 @@
 import {SetOptional, Writable} from 'type-fest';
 import type {BaseItemDto} from '@jellyfin/sdk/lib/generated-client/models';
 import ItemType from 'types/ItemType';
+import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
 import MediaArtist from 'types/MediaArtist';
 import MediaFolder from 'types/MediaFolder';
@@ -8,17 +9,29 @@ import MediaFolderItem from 'types/MediaFolderItem';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
+import MediaServiceId from 'types/MediaServiceId';
 import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import ParentOf from 'types/ParentOf';
+import PlaybackType from 'types/PlaybackType';
 import SortParams from 'types/SortParams';
 import Thumbnail from 'types/Thumbnail';
 import {getMediaObjectId} from 'utils';
+import {MAX_DURATION} from 'services/constants';
+import stationStore from 'services/internetRadio/stationStore';
 import SimplePager from 'services/pagers/SimplePager';
 import WrappedPager from 'services/pagers/WrappedPager';
 import pinStore from 'services/pins/pinStore';
 import EmbyPager, {EmbyPlaylistItemsPager} from './EmbyPager';
 import embySettings from './embySettings';
+import {
+    embyArtistAlbumsSort,
+    embyArtistAlbumsSortMap,
+    embyPlaylistItemsSort,
+    getSortParams,
+} from './embySorting';
+
+const serviceId: MediaServiceId = 'emby';
 
 export function createMediaObject<T extends MediaObject>(
     item: BaseItemDto,
@@ -47,7 +60,7 @@ export function createMediaObject<T extends MediaObject>(
 function createMediaArtist(artist: BaseItemDto, albumSort?: SortParams): MediaArtist {
     const mediaArtist: Writable<SetOptional<MediaArtist, 'pager'>> = {
         itemType: ItemType.Artist,
-        src: `emby:artist:${artist.Id}`,
+        src: `${serviceId}:artist:${artist.Id}`,
         externalUrl: getExternalUrl(artist),
         title: artist.Name || '',
         description: artist.Overview || undefined,
@@ -64,7 +77,7 @@ function createMediaArtist(artist: BaseItemDto, albumSort?: SortParams): MediaAr
 function createMediaAlbum(album: BaseItemDto): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `emby:album:${album.Id}`,
+        src: `${serviceId}:album:${album.Id}`,
         externalUrl: getExternalUrl(album),
         title: album.Name || '',
         description: album.Overview ?? undefined,
@@ -84,7 +97,7 @@ function createMediaAlbum(album: BaseItemDto): MediaAlbum {
 }
 
 function createMediaPlaylist(playlist: BaseItemDto, itemSort?: SortParams): MediaPlaylist {
-    const src = `emby:playlist:${playlist.Id}`;
+    const src = `${serviceId}:playlist:${playlist.Id}`;
     const mediaPlaylist: Writable<SetOptional<MediaPlaylist, 'pager'>> = {
         src,
         itemType: ItemType.Playlist,
@@ -112,7 +125,7 @@ function createMediaFolder(folder: BaseItemDto, parent?: MediaFolder): MediaFold
     const fileName = getFileName(folder.Path || '') || folder.Name || '[unknown]';
     const mediaFolder: Writable<SetOptional<MediaFolder, 'pager'>> = {
         itemType: ItemType.Folder,
-        src: `emby:folder:${folder.Id}`,
+        src: `${serviceId}:folder:${folder.Id}`,
         title: folder.Name || '[unknown]',
         fileName,
         path: parent ? `${parent.path}/${fileName}` : '/',
@@ -129,7 +142,7 @@ function createMediaItem(track: BaseItemDto): MediaItem {
     return {
         itemType: ItemType.Media,
         mediaType: isVideo ? MediaType.Video : MediaType.Audio,
-        src: `emby:${isVideo ? 'video' : 'audio'}:${track.Id}:${
+        src: `${serviceId}:${isVideo ? 'video' : 'audio'}:${track.Id}:${
             (track as any).PresentationUniqueKey || ''
         }`,
         externalUrl: getExternalUrl(track),
@@ -189,25 +202,23 @@ function createThumbnail(id: string, width: number, height = width): Thumbnail {
 
 export function createArtistAlbumsPager(
     artist: MediaArtist,
-    albumSort: SortParams = {
-        sortBy: 'ProductionYear,PremiereDate,SortName',
-        sortOrder: -1,
-    }
+    albumSort = embyArtistAlbumsSort.defaultSort
 ): Pager<MediaAlbum> {
     const allTracks = createArtistAllTracks(artist);
-    const allTracksPager = new SimplePager<MediaAlbum>([allTracks]);
+    const radios = createArtistRadios(artist);
+    const otherTracksPager = new SimplePager<MediaAlbum>([allTracks, radios]);
     const albumsPager = new EmbyPager<MediaAlbum>(`Users/${embySettings.userId}/Items`, {
         AlbumArtistIds: getMediaObjectId(artist),
         IncludeItemTypes: 'MusicAlbum',
-        ...getSortParams(albumSort),
+        ...getSortParams(albumSort, embyArtistAlbumsSortMap),
     });
-    return new WrappedPager(undefined, albumsPager, allTracksPager);
+    return new WrappedPager(undefined, albumsPager, otherTracksPager);
 }
 
 function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `emby:all-tracks:${getMediaObjectId(artist)}`,
+        src: `${serviceId}:all-tracks:${getMediaObjectId(artist)}`,
         title: 'All Songs',
         artist: artist.title,
         thumbnails: artist.thumbnails,
@@ -218,12 +229,45 @@ function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
 }
 
 function createAllTracksPager(artist: MediaArtist): Pager<MediaItem> {
-    return new EmbyPager<MediaItem>(`Users/${embySettings.userId}/Items`, {
-        ArtistIds: getMediaObjectId(artist),
-        IncludeItemTypes: 'Audio',
-        SortBy: 'SortName',
-        SortOrder: 'Ascending',
-    });
+    return new EmbyPager<MediaItem>(
+        `Users/${embySettings.userId}/Items`,
+        {
+            ArtistIds: getMediaObjectId(artist),
+            IncludeItemTypes: 'Audio',
+            SortBy: 'ProductionYear,PremiereDate,Album,ParentIndexNumber,IndexNumber',
+            SortOrder: 'Ascending',
+        },
+        {autofill: true}
+    );
+}
+
+function createArtistRadios(artist: MediaArtist): MediaAlbum {
+    const id = getMediaObjectId(artist);
+    const src = `${serviceId}:artist-radio:${id}`;
+    const radio: MediaItem = {
+        src,
+        title: `${artist.title} - Radio`,
+        itemType: ItemType.Media,
+        mediaType: MediaType.Audio,
+        linearType: LinearType.Station,
+        playbackType: PlaybackType.Direct,
+        duration: MAX_DURATION,
+        thumbnails: artist.thumbnails,
+        playedAt: 0,
+        skippable: true,
+        isFavoriteStation: stationStore.isFavorite({src}),
+        synthetic: true,
+    };
+    return {
+        itemType: ItemType.Album,
+        src: `${serviceId}:radios:${id}`,
+        title: 'Radios',
+        artist: artist.title,
+        thumbnails: artist.thumbnails,
+        pager: new SimplePager([radio]),
+        trackCount: undefined,
+        synthetic: true,
+    };
 }
 
 function createAlbumTracksPager(album: BaseItemDto): Pager<MediaItem> {
@@ -236,10 +280,7 @@ function createAlbumTracksPager(album: BaseItemDto): Pager<MediaItem> {
 
 export function createPlaylistItemsPager(
     playlist: MediaPlaylist,
-    itemSort: SortParams = {
-        sortBy: 'ListItemOrder',
-        sortOrder: 1,
-    }
+    itemSort = embyPlaylistItemsSort.defaultSort
 ): Pager<MediaItem> {
     return new EmbyPlaylistItemsPager(playlist, itemSort);
 }
@@ -285,29 +326,4 @@ function parseDate(date?: string | null): number | undefined {
         const time = Date.parse(date) || 0;
         return time < 0 ? 0 : Math.round(time / 1000);
     }
-}
-
-export function getSortParams({sortBy, sortOrder}: SortParams): {
-    SortBy: string;
-    SortOrder: string;
-} {
-    return {
-        SortBy: sortBy,
-        SortOrder:
-            sortOrder === 1
-                ? 'Ascending'
-                : // Pad with 'Ascending'.
-                  sortBy
-                      .split(',')
-                      .map((sortBy, index, keys) =>
-                          index === 1 &&
-                          (keys[0] === 'ProductionYear' || keys[0] === 'PremiereDate') &&
-                          (sortBy === 'ProductionYear' || sortBy === 'PremiereDate')
-                              ? 'Descending'
-                              : index === 0
-                                ? 'Descending'
-                                : 'Ascending'
-                      )
-                      .join(','),
-    };
 }

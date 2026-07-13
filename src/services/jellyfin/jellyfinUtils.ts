@@ -1,6 +1,7 @@
 import type {BaseItemDto} from '@jellyfin/sdk/lib/generated-client/models';
 import {SetOptional, Writable} from 'type-fest';
 import ItemType from 'types/ItemType';
+import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
 import MediaArtist from 'types/MediaArtist';
 import MediaFolder from 'types/MediaFolder';
@@ -8,20 +9,32 @@ import MediaFolderItem from 'types/MediaFolderItem';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
+import MediaServiceId from 'types/MediaServiceId';
 import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import ParentOf from 'types/ParentOf';
+import PlaybackType from 'types/PlaybackType';
 import SortParams from 'types/SortParams';
 import Thumbnail from 'types/Thumbnail';
 import {getMediaObjectId, uniq} from 'utils';
+import {MAX_DURATION} from 'services/constants';
 import pinStore from 'services/pins/pinStore';
+import stationStore from 'services/internetRadio/stationStore';
 import SimplePager from 'services/pagers/SimplePager';
 import WrappedPager from 'services/pagers/WrappedPager';
 import JellyfinPager, {JellyfinPlaylistItemsPager} from './JellyfinPager';
 import jellyfinApi from './jellyfinApi';
 import jellyfinSettings from './jellyfinSettings';
+import {
+    jellyfinArtistAlbumsSort,
+    jellyfinPlaylistItemsSort,
+    getSortParams,
+    jellyfinArtistAlbumsSortMap,
+} from './jellyfinSorting';
 
 type LegacyBaseItemDto = BaseItemDto & {LUFS?: number | null};
+
+const serviceId: MediaServiceId = 'jellyfin';
 
 export function createMediaObject<T extends MediaObject>(
     item: BaseItemDto,
@@ -65,7 +78,7 @@ export async function getAlbums(items: readonly BaseItemDto[]): Promise<readonly
 function createMediaArtist(artist: BaseItemDto, albumSort?: SortParams): MediaArtist {
     const mediaArtist: Writable<SetOptional<MediaArtist, 'pager'>> = {
         itemType: ItemType.Artist,
-        src: `jellyfin:artist:${artist.Id}`,
+        src: `${serviceId}:artist:${artist.Id}`,
         externalUrl: getExternalUrl(artist),
         title: artist.Name || '',
         playCount: artist.UserData?.PlayCount || undefined,
@@ -81,7 +94,7 @@ function createMediaArtist(artist: BaseItemDto, albumSort?: SortParams): MediaAr
 function createMediaAlbum(album: BaseItemDto): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `jellyfin:album:${album.Id}`,
+        src: `${serviceId}:album:${album.Id}`,
         externalUrl: getExternalUrl(album),
         title: album.Name || '',
         description: album.Overview ?? undefined,
@@ -101,7 +114,7 @@ function createMediaAlbum(album: BaseItemDto): MediaAlbum {
 }
 
 function createMediaPlaylist(playlist: BaseItemDto, itemSort?: SortParams): MediaPlaylist {
-    const src = `jellyfin:playlist:${playlist.Id}`;
+    const src = `${serviceId}:playlist:${playlist.Id}`;
     const mediaPlaylist: Writable<SetOptional<MediaPlaylist, 'pager'>> = {
         src,
         itemType: ItemType.Playlist,
@@ -133,7 +146,7 @@ function createMediaFolder(folder: BaseItemDto, parent?: MediaFolder): MediaFold
     const fileName = getFileName(folder.Path || '') || folder.Name || '[unknown]';
     const mediaFolder: Writable<SetOptional<MediaFolder, 'pager'>> = {
         itemType: ItemType.Folder,
-        src: `jellyfin:folder:${folder.Id}`,
+        src: `${serviceId}:folder:${folder.Id}`,
         title: folder.Name || '[unknown]',
         fileName,
         path: parent ? `${parent.path}/${fileName}` : '/',
@@ -153,7 +166,7 @@ function createMediaItem(track: LegacyBaseItemDto): MediaItem {
     return {
         itemType: ItemType.Media,
         mediaType: isVideo ? MediaType.Video : MediaType.Audio,
-        src: `jellyfin:${isVideo ? 'video' : 'audio'}:${track.Id}`,
+        src: `${serviceId}:${isVideo ? 'video' : 'audio'}:${track.Id}`,
         externalUrl: getExternalUrl(track),
         fileName: getFileName(track.Path || '') || track.Name || '[unknown]',
         title: track.Name || '',
@@ -217,25 +230,23 @@ function createAlbumTracksPager(album: BaseItemDto): Pager<MediaItem> {
 
 export function createArtistAlbumsPager(
     artist: MediaArtist,
-    albumSort: SortParams = {
-        sortBy: 'ProductionYear,PremiereDate,SortName',
-        sortOrder: -1,
-    }
+    albumSort = jellyfinArtistAlbumsSort.defaultSort
 ): Pager<MediaAlbum> {
     const allTracks = createArtistAllTracks(artist);
-    const allTracksPager = new SimplePager<MediaAlbum>([allTracks]);
+    const radios = createArtistRadios(artist);
+    const otherTracksPager = new SimplePager<MediaAlbum>([allTracks, radios]);
     const albumsPager = new JellyfinPager<MediaAlbum>(`Users/${jellyfinSettings.userId}/Items`, {
         AlbumArtistIds: getMediaObjectId(artist),
         IncludeItemTypes: 'MusicAlbum',
-        ...getSortParams(albumSort),
+        ...getSortParams(albumSort, jellyfinArtistAlbumsSortMap),
     });
-    return new WrappedPager(undefined, albumsPager, allTracksPager);
+    return new WrappedPager(undefined, albumsPager, otherTracksPager);
 }
 
 function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
     return {
         itemType: ItemType.Album,
-        src: `jellyfin:all-tracks:${getMediaObjectId(artist)}`,
+        src: `${serviceId}:all-tracks:${getMediaObjectId(artist)}`,
         title: 'All Songs',
         artist: artist.title,
         thumbnails: artist.thumbnails,
@@ -246,20 +257,50 @@ function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
 }
 
 function createAllTracksPager(artist: MediaArtist): Pager<MediaItem> {
-    return new JellyfinPager<MediaItem>(`Users/${jellyfinSettings.userId}/Items`, {
-        ArtistIds: getMediaObjectId(artist),
-        IncludeItemTypes: 'Audio',
-        SortBy: 'Name',
-        SortOrder: 'Ascending',
-    });
+    return new JellyfinPager<MediaItem>(
+        `Users/${jellyfinSettings.userId}/Items`,
+        {
+            ArtistIds: getMediaObjectId(artist),
+            IncludeItemTypes: 'Audio',
+            SortBy: 'ProductionYear,PremiereDate,Album,ParentIndexNumber,IndexNumber',
+            SortOrder: 'Ascending',
+        },
+        {autofill: true}
+    );
+}
+
+function createArtistRadios(artist: MediaArtist): MediaAlbum {
+    const id = getMediaObjectId(artist);
+    const src = `${serviceId}:artist-radio:${id}`;
+    const radio: MediaItem = {
+        src,
+        title: `${artist.title} - Radio`,
+        itemType: ItemType.Media,
+        mediaType: MediaType.Audio,
+        linearType: LinearType.Station,
+        playbackType: PlaybackType.Direct,
+        duration: MAX_DURATION,
+        thumbnails: artist.thumbnails,
+        playedAt: 0,
+        skippable: true,
+        isFavoriteStation: stationStore.isFavorite({src}),
+        synthetic: true,
+    };
+    return {
+        itemType: ItemType.Album,
+        src: `${serviceId}:radios:${id}`,
+        title: 'Radios',
+        artist: artist.title,
+        thumbnails: artist.thumbnails,
+        pager: new SimplePager([radio]),
+        trackCount: undefined,
+        synthetic: true,
+    };
 }
 
 export function createPlaylistItemsPager(
     playlist: MediaPlaylist,
-    itemSort: SortParams = {
-        sortBy: 'ListItemOrder',
-        sortOrder: 1,
-    }
+    itemSort = jellyfinPlaylistItemsSort.defaultSort
 ): Pager<MediaItem> {
     return new JellyfinPlaylistItemsPager(playlist, itemSort);
 }
@@ -305,29 +346,4 @@ function parseDate(date?: string | null): number | undefined {
         const time = Date.parse(date) || 0;
         return time < 0 ? 0 : Math.round(time / 1000);
     }
-}
-
-export function getSortParams({sortBy, sortOrder}: SortParams): {
-    SortBy: string;
-    SortOrder: string;
-} {
-    return {
-        SortBy: sortBy,
-        SortOrder:
-            sortOrder === 1
-                ? 'Ascending'
-                : // Pad with 'Ascending'.
-                  sortBy
-                      .split(',')
-                      .map((sortBy, index, keys) =>
-                          index === 1 &&
-                          (keys[0] === 'ProductionYear' || keys[0] === 'PremiereDate') &&
-                          (sortBy === 'ProductionYear' || sortBy === 'PremiereDate')
-                              ? 'Descending'
-                              : index === 0
-                                ? 'Descending'
-                                : 'Ascending'
-                      )
-                      .join(','),
-    };
 }

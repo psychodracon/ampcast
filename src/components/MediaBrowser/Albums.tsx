@@ -1,14 +1,13 @@
 import React, {useState} from 'react';
 import MediaAlbum from 'types/MediaAlbum';
+import {albumTracksLayout} from 'components/MediaList/layouts';
 import AlbumList from 'components/MediaList/AlbumList';
 import MediaItemList from 'components/MediaList/MediaItemList';
 import Splitter from 'components/Splitter';
 import {PagedItemsProps} from './PagedItems';
-import useAlbumTracksLayout from './useAlbumTracksLayout';
 
 export default function Albums({source, ...props}: PagedItemsProps<MediaAlbum>) {
     const [[selectedAlbum], setSelectedAlbum] = useState<readonly MediaAlbum[]>([]);
-    const albumTracksLayout = useAlbumTracksLayout(selectedAlbum);
     const tracksPager = selectedAlbum?.pager || null;
 
     const albumList = (
@@ -25,6 +24,7 @@ export default function Albums({source, ...props}: PagedItemsProps<MediaAlbum>) 
         <MediaItemList
             title={selectedAlbum ? `${selectedAlbum.title}: Tracks` : ''}
             className={`album-tracks ${selectedAlbum?.multiDisc ? 'multi-disc' : ''}`}
+            parent={selectedAlbum}
             pager={tracksPager}
             defaultLayout={albumTracksLayout}
             source={source}
