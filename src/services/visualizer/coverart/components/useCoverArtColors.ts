@@ -9,8 +9,15 @@ import {
     getPalette,
     getSwatches,
 } from 'colorthief';
-import {mostReadable} from '@ctrl/tinycolor';
-import {exists, filterNotEmpty} from 'utils';
+import {
+    exists,
+    filterNotEmpty,
+    isDark,
+    isDarker,
+    isReadable,
+    mostReadable,
+    readability,
+} from 'utils';
 
 export interface CovertArtColors {
     readonly backgroundColors: readonly [string, string];
@@ -23,10 +30,6 @@ export const defaultColors: CovertArtColors = {
     textColor: '#ebebeb',
     beatsColor: '#808080',
 };
-
-export function isDark(color: string): boolean {
-    return new Color(color).to('lch').l! < 50;
-}
 
 export default function useCoverArtColors(coverArtUrl: string): CovertArtColors {
     const [coverArtColors, setCoverArtColors] = useState<CovertArtColors>(defaultColors);
@@ -64,13 +67,14 @@ export default function useCoverArtColors(coverArtUrl: string): CovertArtColors 
                 } else {
                     setCoverArtColors(defaultColors);
                 }
-            } catch {
+            } catch (err) {
+                console.error(err);
                 setCoverArtColors(defaultColors);
             }
         };
 
         img.crossOrigin = 'anonymous';
-        img.src = coverArtUrl;
+        img.src = tweakUrl(coverArtUrl);
 
         if (img.complete) {
             onload(img);
@@ -197,7 +201,6 @@ function getTextColor(
     backgroundColors: [string, string]
 ): string {
     const backgroundColor = mixBackgroundColors(backgroundColors);
-    const fallbackColor = isDark(backgroundColor) ? '#ffffff' : '#000000';
     const colors = palette
         .map((color) => color.hex())
         .concat(
@@ -206,12 +209,26 @@ function getTextColor(
                 .filter(exists)
                 .map((swatch) => swatch.color.hex())
         );
-    return (
-        mostReadable(backgroundColor, colors, {
-            level: 'AA',
-            size: 'small',
-        })?.toHexString() || fallbackColor
-    );
+
+    const textColor = mostReadable(backgroundColor, colors);
+    if (isReadable(backgroundColor, textColor)) {
+        return textColor;
+    }
+    if (readability(backgroundColor, textColor) > 1.5) {
+        // If we can't find a good text colour then find
+        // a suitable light/dark colour and mix it with white/black.
+        let readableColor = new Color(textColor);
+        const mixColor = isDarker(textColor, backgroundColor) ? '#000000' : '#ffffff';
+        if (isReadable(backgroundColor, mixColor)) {
+            while (!isReadable(backgroundColor, readableColor)) {
+                readableColor = new Color(mixColor).mix(readableColor, 0.9);
+            }
+        }
+        if (isReadable(backgroundColor, readableColor)) {
+            return readableColor.toString({format: 'hex'});
+        }
+    }
+    return isDark(backgroundColor) ? '#ffffff' : '#000000';
 }
 
 function getBeatsColor(
@@ -226,7 +243,10 @@ function getBeatsColor(
         return !!color && new Color(color2).deltaE2000(color.hex()) > 20;
     };
     const getSwatch = (key: keyof SwatchMap) => swatches?.[key]?.color;
-    const mostVibrant = [findMostVibrant(palette), getSwatch('Vibrant')];
+    const mostVibrant = [
+        findMostVibrant(palette.filter((color) => !backgroundColors.includes(color.hex()))),
+        getSwatch('Vibrant'),
+    ];
     const otherColors = [
         getSwatch(isDark(backgroundColor) ? 'LightVibrant' : 'DarkVibrant'),
         getSwatch(isDark(backgroundColor) ? 'DarkVibrant' : 'LightVibrant'),
@@ -244,13 +264,28 @@ function mixBackgroundColors([a, b]: [string, string]): string {
 }
 
 function findMostVibrant(palette: readonly ColorThiefColor[]): ColorThiefColor | undefined {
-    const vibrantColor = palette.reduce((mostVibrant, color) =>
-        color.oklch().c > mostVibrant.oklch().c ? color : mostVibrant
-    );
-    // Only return a dominant vibrant colour. Otherwise, use the swatches.
-    if (vibrantColor.proportion > 0.1 && vibrantColor.oklch().c > 0.1) {
-        return vibrantColor;
+    if (palette.length > 0) {
+        const vibrantColor = palette.reduce((mostVibrant, color) =>
+            color.oklch().c > mostVibrant.oklch().c ? color : mostVibrant
+        );
+        // Only return a dominant vibrant colour. Otherwise, use the swatches.
+        if (vibrantColor.proportion > 0.05 && vibrantColor.oklch().c > 0.1) {
+            return vibrantColor;
+        }
     }
+}
+
+function tweakUrl(src: string): string {
+    // Re-arrange the search params to create a new URL.
+    // This will bust the cache and return the same resource.
+    // This fixes Plex errors re-fetching an image.
+    const url = new URL(src);
+    const [[key, value = ''] = []] = [...url.searchParams];
+    if (key) {
+        url.searchParams.delete(key);
+        url.searchParams.append(key, value);
+    }
+    return String(url);
 }
 
 // function logColors(palette: readonly ColorThiefColor[], swatches: SwatchMap | null) {
@@ -266,13 +301,22 @@ function findMostVibrant(palette: readonly ColorThiefColor[]): ColorThiefColor |
 //     }
 //     console.log('--------------------------------------------');
 // }
-
-// function logColor(color: ColorThiefColor, name = '') {
+//
+// function logColor(color: ColorThiefColor | Color | string, name: any = '', ...args: any[]) {
+//     if (color instanceof Color) {
+//         color = color.toString({format: 'hex'});
+//     } else if (typeof color === 'object' && 'hex' in color) {
+//         name = `${Math.round(color.proportion * 1000) / 10}% ${name}`;
+//         color = color.hex();
+//     }
 //     console.log(
-//         `%c${color.hex()} ${Math.round(color.proportion * 1000) / 10}% ${name}`,
-//         `background-color: ${color.hex()};
-//          color: ${color.contrast.foreground};
-//          text-shadow: 1px 1px 1px ${color.isDark ? 'black' : 'rgba(0,0,0,0.2)'};
-//          padding: 3px;`
+//         `%c${color}`,
+//         `display: inline-block;
+//          background-color: ${color};
+//          color: contrast-color(${color});
+//          border: 1px solid black;
+//          padding: 1px 4px;`,
+//         name,
+//         ...args
 //     );
 // }

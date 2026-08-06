@@ -3,10 +3,7 @@ import MediaType from 'types/MediaType';
 import PlaylistItem from 'types/PlaylistItem';
 import type CovertArtController from '../CovertArtController';
 import audio from 'services/audio';
-import fonts, {loadFont} from 'services/theme/fonts';
-import {Thumbnail} from 'components/MediaInfo';
 import usePrevious from 'hooks/usePrevious';
-import useVisualizerSettings from 'hooks/useVisualizerSettings';
 import coverart from '../coverart';
 import CurrentlyPlaying from './CurrentlyPlaying';
 import useCoverArtItems from './useCoverArtItems';
@@ -14,12 +11,10 @@ import './CoverArtVisualizer.scss';
 
 export default function CoverArtVisualizer() {
     const ref = useRef<HTMLDivElement>(null);
-    const {coverArtFont} = useVisualizerSettings();
     const player = useMemo(() => coverart.createPlayer(audio) as CovertArtController, []);
     const [hidden, setHidden] = useState(true);
-    const {current: currentTrack, next: nextTrack} = useCoverArtItems();
+    const {current: currentTrack} = useCoverArtItems();
     const item = currentTrack?.mediaType === MediaType.Video ? null : currentTrack;
-    const nextItem = nextTrack?.mediaType === MediaType.Video ? null : nextTrack;
     const [currentIndex, setCurrentIndex] = useState<0 | 1 | -1>(-1);
     const [item0, setItem0] = useState<PlaylistItem | null>(null);
     const [item1, setItem1] = useState<PlaylistItem | null>(null);
@@ -53,37 +48,24 @@ export default function CoverArtVisualizer() {
         }
     }, [item, changed, currentIndex]);
 
-    useEffect(() => {
-        const style = ref.current!.style;
-        if (coverArtFont) {
-            const font = fonts.find((font) => font.name === coverArtFont) || fonts[0];
-            style.setProperty('--font-family', font.value);
-            loadFont(font);
-        } else {
-            style.removeProperty('--font-family');
-        }
-    }, [coverArtFont]);
-
     return (
-        <div className="visualizer-coverart visualizer" ref={ref}>
-            <CurrentlyPlaying
-                item={item0}
-                player={player?.player0}
-                hidden={hidden || !isItem0}
-                key="item0"
-            />
-            <CurrentlyPlaying
-                item={item1}
-                player={player?.player1}
-                hidden={hidden || !isItem1}
-                key="item1"
-            />
-            {/* Preload next item thumbnail */}
-            {nextItem ? (
-                <div hidden>
-                    <Thumbnail item={nextItem} size={800} extendedSearch />
-                </div>
-            ) : null}
+        <div className="visualizer-coverart visualizer" hidden={hidden} ref={ref}>
+            {hidden ? null : (
+                <>
+                    <CurrentlyPlaying
+                        item={item0}
+                        player={player?.player0}
+                        hidden={!isItem0}
+                        key="item0"
+                    />
+                    <CurrentlyPlaying
+                        item={item1}
+                        player={player?.player1}
+                        hidden={!isItem1}
+                        key="item1"
+                    />
+                </>
+            )}
         </div>
     );
 }
