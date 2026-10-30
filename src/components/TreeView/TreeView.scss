@@ -10,6 +10,12 @@
     user-select: none;
     cursor: default;
 
+    &:has([role="tree"]:empty) {
+        .scrollbar {
+            visibility: hidden;
+        }
+    }
+
     &.minimal-width {
         .text {
             visibility: hidden;
@@ -17,6 +23,10 @@
 
         .scrollbar {
             display: none;
+        }
+
+        .scrollable-content {
+            right: 0 !important;
         }
     }
 

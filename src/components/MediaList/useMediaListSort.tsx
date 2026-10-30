@@ -5,18 +5,20 @@ import {MediaSourceItems} from 'types/MediaSource';
 import SortParams from 'types/SortParams';
 import {setSourceSorting} from 'services/mediaServices/servicesSettings';
 import {sorter} from 'services/metadata';
+import useIsBrowserActive from 'components/MediaBrowser/useIsBrowserActive';
 import useSorting from 'hooks/useSorting';
 
 export default function useMediaListSort<T extends MediaObject>(
-    id: string,
+    listId: string,
     items: readonly T[],
     isSearchResult: boolean,
     sourceItems: MediaSourceItems,
     complete: boolean,
     onInternalSort?: (params: SortParams) => void
 ) {
+    const active = useIsBrowserActive();
     const defaultSort = isSearchResult ? undefined : sourceItems.sort?.defaultSort;
-    const externalSortParams = useSorting(isSearchResult ? '' : id);
+    const externalSortParams = useSorting(isSearchResult ? '' : listId, !active);
     const [internalSortParams, setInternalSortParams] = useState<SortParams | undefined>();
     const [sortedItems, setSortedItems] = useState<readonly T[]>(items);
     const sortParams = internalSortParams || externalSortParams || defaultSort;
@@ -36,10 +38,10 @@ export default function useMediaListSort<T extends MediaObject>(
                 setSorting(true);
                 setInternalSortParams(params);
             } else {
-                setSourceSorting(id, params);
+                setSourceSorting(listId, params);
             }
         },
-        [id, complete]
+        [listId, complete]
     );
 
     useEffect(() => {
@@ -77,11 +79,11 @@ export default function useMediaListSort<T extends MediaObject>(
             const externalSortKeys = Object.keys(sourceItems.sort?.sortOptions || {});
             if (externalSortKeys.includes(internalSortParams.sortBy)) {
                 // If the internal sort matches an external sort then save it and use it next time.
-                setSourceSorting(id, internalSortParams, true);
+                setSourceSorting(listId, internalSortParams, true);
                 setSavedSortParams(internalSortParams);
             }
         }
-    }, [id, internalSortParams, sourceItems, isSearchResult]);
+    }, [listId, internalSortParams, sourceItems, isSearchResult]);
 
     return {
         sortedItems: sorting ? [] : sortedItems,

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, {useCallback} from 'react';
+import AlbumType from 'types/AlbumType';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
@@ -6,6 +7,8 @@ import MediaArtist from 'types/MediaArtist';
 import MediaItem from 'types/MediaItem';
 import MediaType from 'types/MediaType';
 import {copyToClipboard} from 'utils';
+import {getServiceFromSrc} from 'services/mediaServices';
+import {error} from 'components/Dialog';
 import {CopyButton} from 'components/Button';
 import Icon from 'components/Icon';
 import './Badge.scss';
@@ -29,7 +32,9 @@ export interface AlbumTypeBadgeProps {
 }
 
 export function AlbumTypeBadge({item}: AlbumTypeBadgeProps) {
-    return item.albumType ? <Badge className="album-type">{item.albumType}</Badge> : null;
+    return item.albumType && item.albumType !== AlbumType.Album ? (
+        <Badge className="album-type">{item.albumType}</Badge>
+    ) : null;
 }
 
 export interface BitRateBadgeProps {
@@ -81,11 +86,25 @@ export interface ShareLinkProps {
 }
 
 export function ShareLink({item}: ShareLinkProps) {
-    return item.shareLink ? (
+    const service = getServiceFromSrc(item);
+
+    const handleClick = useCallback(async () => {
+        try {
+            let shareLink = item.shareLink;
+            if (!shareLink && service?.createShareLink) {
+                shareLink = await service.createShareLink(item);
+            }
+            await copyToClipboard(shareLink);
+        } catch (err: any) {
+            error({message: err?.message || 'Could not create share link'});
+        }
+    }, [item, service]);
+
+    return item.shareLink || service?.createShareLink ? (
         <CopyButton
             className="badge share-link"
             title="Copy link to clipboard"
-            onClick={() => copyToClipboard(item.shareLink)}
+            onClick={handleClick}
         >
             Share link
         </CopyButton>
@@ -113,15 +132,16 @@ export function LastFmBadge({item}: ExternalLinkBadgeProps) {
     switch (item.itemType) {
         case ItemType.Media: {
             const artist = encodeURIComponent(item.artists?.[0] || '');
-            if (artist && item.title) {
+            if (artist && title) {
                 path = `${artist}/${encodeURIComponent(item.album || '') || '_'}/${title}`;
             }
             break;
         }
 
         case ItemType.Album: {
-            if (item.artist && title) {
-                path = `${encodeURIComponent(item.artist)}/${title}`;
+            const artist = encodeURIComponent(item.artists?.[0] || '');
+            if (artist && title) {
+                path = `${encodeURIComponent(artist)}/${title}`;
             }
             break;
         }

@@ -1,5 +1,10 @@
 export {default} from './Actions';
 export * from './Actions';
 export * from './ActionsMenu';
+export * from './HeaderMenu';
+export * from './MediaSourceMenu';
 export * from './PlaylistActions';
+export * from './Actions';
+export {default as ShowActionsMenuContext} from './ShowActionsMenuContext';
+export {default as SyntheticAlbumContext} from './SyntheticAlbumContext';
 export {default as performAction} from './performAction';

@@ -4,32 +4,29 @@ import Pager from 'types/Pager';
 export interface FetchFirstPageOptions {
     readonly timeout?: number;
     readonly keepAlive?: boolean;
+    readonly suppressErrors?: boolean;
 }
 
 export default function fetchFirstPage<T>(
     pager: Pager<T>,
-    {timeout = 5000, keepAlive = false}: FetchFirstPageOptions = {}
+    {timeout = 5000, keepAlive, suppressErrors}: FetchFirstPageOptions = {}
 ): Promise<readonly T[]> {
     return new Promise((resolve, reject) => {
         const items$ = pager.observeItems();
-        const error$ = race(
-            pager
-                .observeError()
-                .pipe(
-                    map((error: any) =>
-                        error instanceof Error ? error : Error(error?.message || 'unknown')
-                    )
-                ),
-            timer(timeout).pipe(map(() => Error('timeout')))
-        );
+        const error$ = race(pager.observeError(), timer(timeout).pipe(map(() => Error('timeout'))));
         race(items$, error$).subscribe((result) => {
-            if (!keepAlive) {
-                pager.disconnect();
-            }
-            if (result instanceof Error) {
-                reject(result);
-            } else {
+            if (Array.isArray(result)) {
+                if (!keepAlive) {
+                    pager.disconnect(true);
+                }
                 resolve(result);
+            } else {
+                pager.disconnect();
+                if (suppressErrors) {
+                    resolve([]);
+                } else {
+                    reject(result);
+                }
             }
         });
         pager.fetchAt(0);

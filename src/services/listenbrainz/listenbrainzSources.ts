@@ -9,6 +9,7 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import MediaSource, {MediaMultiSource} from 'types/MediaSource';
 import Pager from 'types/Pager';
+import Pin, {Pinnable} from 'types/Pin';
 import {uniq} from 'utils';
 import SimplePager from 'services/pagers/SimplePager';
 import ListenBrainzHistoryPager from './ListenBrainzHistoryPager';
@@ -22,6 +23,26 @@ import ListenBrainzScrobblesBrowser from './components/ListenBrainzScrobblesBrow
 import {albumsLayout, getDefaultLayout} from 'components/MediaList/layouts';
 
 const serviceId: MediaServiceId = 'listenbrainz';
+
+export function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
+    if (pin.itemType !== ItemType.Playlist) {
+        throw Error('Unsupported Pin type.');
+    }
+    return {
+        title: pin.title,
+        itemType: pin.itemType,
+        id: pin.src,
+        sourceId: `${serviceId}/pinned-playlist`,
+        icon: 'pin',
+        isPin: true,
+        singular: true,
+
+        search(): Pager<MediaPlaylist> {
+            const [, , playlist_mbid] = pin.src.split(':');
+            return new ListenBrainzPlaylistsPager(`playlist/${playlist_mbid}`, true);
+        },
+    } as MediaSource<T>;
+}
 
 const listenbrainzHistory: MediaSource<MediaItem> = {
     id: `${serviceId}/history`,
@@ -53,7 +74,7 @@ const listenbrainzLovedTracks: MediaSource<MediaItem> = {
     title: 'Loved Tracks',
     icon: 'heart',
     itemType: ItemType.Media,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
 
     search(): Pager<MediaItem> {
         return new ListenBrainzLikesPager();

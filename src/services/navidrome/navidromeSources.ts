@@ -12,8 +12,10 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import MediaSource, {AnyMediaSource, MediaMultiSource, MediaSourceItems} from 'types/MediaSource';
 import Pager from 'types/Pager';
-import {uniq} from 'utils';
+import Pin, {Pinnable} from 'types/Pin';
+import {getItemTypeFromSrc, getMediaObjectId} from 'utils';
 import {t} from 'services/i18n';
+import {createSingularMediaSource} from 'services/mediaServices/mediaSources';
 import SimplePager from 'services/pagers/SimplePager';
 import NavidromeIndexedPager from './NavidromeIndexedPager';
 import NavidromeRecentlyPlayedPager from './NavidromeRecentlyPlayedPager';
@@ -32,9 +34,8 @@ import {createArtistAlbumsPager, createPlaylistItemsPager} from './navidromeUtil
 import {
     defaultMediaItemCard,
     albumsLayout,
-    mediaItemsLayout,
     mostPlayedTracksLayout,
-    radiosLayoutSmall,
+    radiosLayout,
     recentlyAddedAlbumsLayout,
     recentlyPlayedTracksLayout,
     artistsLayout,
@@ -43,11 +44,7 @@ import {
 
 const serviceId: MediaServiceId = 'navidrome';
 
-const navidromeTracksLayout: MediaListLayout = addRating(mediaItemsLayout);
-
-const navidromeAlbumsLayout: MediaListLayout = addRating(albumsLayout);
-
-export const navidromePlaylistLayout: Partial<MediaListLayout> = {
+export const navidromePlaylistsLayout: Partial<MediaListLayout> = {
     card: {
         h1: 'Name',
         h2: 'Description',
@@ -69,6 +66,89 @@ export const navidromePlaylistItems: MediaSourceItems<SetRequired<MediaItem, 'na
     itemKey: 'nanoId',
 };
 
+export function createSourceFromObject<T extends MediaObject>(src: string): MediaSource<T> {
+    const itemType = getItemTypeFromSrc(src);
+    switch (itemType) {
+        case ItemType.Artist:
+            return createSingularMediaSource<MediaArtist>({
+                src,
+                itemType,
+                secondaryItems: {
+                    sort: navidromeArtistAlbumsSort,
+                },
+                childSort: navidromeArtistAlbumsSort.defaultSort,
+                createChildPager: createArtistAlbumsPager,
+            }) as MediaSource<T>;
+
+        case ItemType.Playlist:
+            return createSingularMediaSource<MediaPlaylist>({
+                src,
+                itemType,
+                primaryItems: {
+                    layout: navidromePlaylistsLayout,
+                },
+                secondaryItems: navidromePlaylistItems,
+                childSort: navidromePlaylistItemsSort.defaultSort,
+                createChildPager: createPlaylistItemsPager,
+            }) as MediaSource<T>;
+
+        default:
+            return createSingularMediaSource<T>({
+                src,
+                itemType,
+            });
+    }
+}
+
+export function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
+    return createSingularMediaSource<MediaPlaylist>({
+        src: pin.src,
+        itemType: ItemType.Playlist,
+        isPin: true,
+        primaryItems: {
+            layout: navidromePlaylistsLayout,
+        },
+        secondaryItems: navidromePlaylistItems,
+        childSort: navidromePlaylistItemsSort.defaultSort,
+        createChildPager: createPlaylistItemsPager,
+    }) as MediaSource<T>;
+}
+
+export function createRelatedPlaylistsSource<T extends MediaObject>(
+    item: T
+): MediaSource<MediaPlaylist> | undefined {
+    switch (item.itemType) {
+        case ItemType.Media: {
+            const sourceId = `${serviceId}/playlists`;
+            const songId = getMediaObjectId(item);
+            return {
+                id: `${item.src}/related-playlists`,
+                sourceId,
+                title: 'Related Playlists',
+                icon: 'playlist',
+                itemType: ItemType.Playlist,
+                primaryItems: {
+                    layout: navidromePlaylistsLayout,
+                },
+                secondaryItems: navidromePlaylistItems,
+
+                search(): Pager<MediaPlaylist> {
+                    return new NavidromeIndexedPager(
+                        ItemType.Playlist,
+                        `song/${songId}/playlists`,
+                        undefined,
+                        {
+                            childSort: navidromePlaylistItemsSort.defaultSort,
+                            childSortId: `${sourceId}/2`,
+                        },
+                        createPlaylistItemsPager
+                    );
+                },
+            };
+        }
+    }
+}
+
 export const navidromeSearch: MediaMultiSource = {
     id: `${serviceId}/search`,
     title: 'Search',
@@ -82,7 +162,6 @@ export const navidromeSearch: MediaMultiSource = {
                 title: 'Songs',
                 primaryItems: {
                     layout: {
-                        ...navidromeTracksLayout,
                         view: 'details',
                     },
                     sort: {
@@ -107,7 +186,6 @@ export const navidromeSearch: MediaMultiSource = {
                 id: 'albums',
                 title: 'Albums',
                 primaryItems: {
-                    layout: navidromeAlbumsLayout,
                     sort: {
                         sortOptions: {
                             Title: 'Title',
@@ -146,7 +224,7 @@ export const navidromeSearch: MediaMultiSource = {
                 id: 'playlists',
                 title: 'Playlists',
                 primaryItems: {
-                    layout: navidromePlaylistLayout,
+                    layout: navidromePlaylistsLayout,
                     sort: {
                         sortOptions: {
                             Name: 'Name',
@@ -170,10 +248,9 @@ const navidromeLikedSongs: MediaSource<MediaItem> = {
     title: 'My Songs',
     icon: 'heart',
     itemType: ItemType.Media,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     primaryItems: {
         emptyMessage: t("You don't have any favorite songs."),
-        layout: navidromeTracksLayout,
         sort: {
             sortOptions: {
                 Title: 'Title',
@@ -203,13 +280,13 @@ const navidromeLikedSongs: MediaSource<MediaItem> = {
 
 const navidromeLikedAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/liked-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'My Albums',
     icon: 'heart',
     itemType: ItemType.Album,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     primaryItems: {
         emptyMessage: t("You don't have any favorite albums."),
-        layout: navidromeAlbumsLayout,
         sort: {
             sortOptions: {
                 Title: 'Title',
@@ -238,10 +315,11 @@ const navidromeLikedAlbums: MediaSource<MediaAlbum> = {
 
 const navidromeLikedArtists: MediaSource<MediaArtist> = {
     id: `${serviceId}/liked-artists`,
+    sourceId: `${serviceId}/artists`,
     title: 'My Artists',
     icon: 'heart',
     itemType: ItemType.Artist,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     defaultHidden: true,
     primaryItems: {
         emptyMessage: t("You don't have any favorite artists."),
@@ -274,7 +352,7 @@ const navidromeLikedArtists: MediaSource<MediaArtist> = {
             },
             {
                 childSort: navidromeArtistAlbumsSort.defaultSort,
-                childSortId: `${navidromeLikedArtists.id}/2`,
+                childSortId: `${navidromeLikedArtists.sourceId}/2`,
             },
             createArtistAlbumsPager
         );
@@ -286,7 +364,7 @@ const navidromeTopTracks: MediaSource<MediaItem> = {
     title: 'Top Tracks',
     icon: 'star',
     itemType: ItemType.Media,
-    lockActionsStore: true,
+    lockActionType: 'rating',
     defaultHidden: true,
     primaryItems: {
         layout: topTracksLayout,
@@ -304,16 +382,17 @@ const navidromeTopTracks: MediaSource<MediaItem> = {
 
 const navidromeTopAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/top-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'Top Albums',
     icon: 'star',
     itemType: ItemType.Album,
-    lockActionsStore: true,
+    lockActionType: 'rating',
     defaultHidden: true,
     primaryItems: {
         layout: {
-            ...navidromeAlbumsLayout,
+            ...albumsLayout,
             card: {
-                ...navidromeAlbumsLayout.card,
+                ...albumsLayout.card,
                 data: 'Rating',
             },
         },
@@ -331,14 +410,15 @@ const navidromeTopAlbums: MediaSource<MediaAlbum> = {
 
 const navidromeTopArtists: MediaSource<MediaArtist> = {
     id: `${serviceId}/top-artists`,
+    sourceId: `${serviceId}/artists`,
     title: 'Top Artists',
     icon: 'star',
     itemType: ItemType.Artist,
-    lockActionsStore: true,
+    lockActionType: 'rating',
     defaultHidden: true,
     primaryItems: {
         layout: {
-            ...addRating(artistsLayout),
+            ...artistsLayout,
             card: {
                 ...artistsLayout.card,
                 h3: 'Rating',
@@ -357,7 +437,7 @@ const navidromeTopArtists: MediaSource<MediaArtist> = {
             (items) => items.filter((item) => !!item.rating),
             {
                 childSort: navidromeArtistAlbumsSort.defaultSort,
-                childSortId: `${navidromeTopArtists.id}/2`,
+                childSortId: `${navidromeTopArtists.sourceId}/2`,
             },
             createArtistAlbumsPager
         );
@@ -370,7 +450,7 @@ const navidromeRecentlyAdded: MediaSource<MediaAlbum> = {
     icon: 'recently-added',
     itemType: ItemType.Album,
     primaryItems: {
-        layout: addRating(recentlyAddedAlbumsLayout),
+        layout: recentlyAddedAlbumsLayout,
     },
 
     search(): Pager<MediaAlbum> {
@@ -420,7 +500,7 @@ export const navidromePlaylists: MediaSource<MediaPlaylist> = {
     icon: 'playlist',
     itemType: ItemType.Playlist,
     primaryItems: {
-        layout: navidromePlaylistLayout,
+        layout: navidromePlaylistsLayout,
         sort: {
             sortOptions: {
                 Name: 'Name',
@@ -462,7 +542,6 @@ const navidromeTracksByGenre: MediaSource<MediaItem> = {
     filterType: FilterType.ByGenre,
     defaultHidden: true,
     primaryItems: {
-        layout: navidromeTracksLayout,
         sort: {
             sortOptions: {
                 Title: 'Title',
@@ -495,12 +574,12 @@ const navidromeTracksByGenre: MediaSource<MediaItem> = {
 
 const navidromeAlbumsByGenre: MediaSource<MediaAlbum> = {
     id: `${serviceId}/albums-by-genre`,
+    sourceId: `${serviceId}/albums`,
     title: 'Albums by Genre',
     icon: 'genre',
     itemType: ItemType.Album,
     filterType: FilterType.ByGenre,
     primaryItems: {
-        layout: navidromeAlbumsLayout,
         sort: {
             sortOptions: {
                 Title: 'Title',
@@ -535,9 +614,6 @@ const navidromeRandomTracks: MediaSource<MediaItem> = {
     title: 'Random Songs',
     icon: 'shuffle',
     itemType: ItemType.Media,
-    primaryItems: {
-        layout: navidromeTracksLayout,
-    },
 
     search(): Pager<MediaItem> {
         return new NavidromeIndexedPager(ItemType.Media, 'song', {_sort: 'random'}, {maxSize: 100});
@@ -546,12 +622,10 @@ const navidromeRandomTracks: MediaSource<MediaItem> = {
 
 const navidromeRandomAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/random-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'Random Albums',
     icon: 'shuffle',
     itemType: ItemType.Album,
-    primaryItems: {
-        layout: navidromeAlbumsLayout,
-    },
 
     search(): Pager<MediaAlbum> {
         return new NavidromeIndexedPager(
@@ -572,7 +646,7 @@ const navidromeRadio: MediaSource<MediaItem> = {
     defaultHidden: true,
     primaryItems: {
         label: 'Radios',
-        layout: radiosLayoutSmall,
+        layout: radiosLayout,
         sort: navidromeRadiosSort,
     },
 
@@ -670,12 +744,5 @@ function createSearch<T extends MediaObject>(
                     throw TypeError('Search not supported for this type of media');
             }
         },
-    };
-}
-
-function addRating(layout: MediaListLayout): MediaListLayout {
-    return {
-        ...layout,
-        details: uniq(layout.details.concat('Rating')),
     };
 }

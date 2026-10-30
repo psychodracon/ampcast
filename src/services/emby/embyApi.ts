@@ -19,11 +19,13 @@ import {
     canPlayNativeHls,
     canPlayVideo,
     chunk,
+    getLibraryIdFromPath,
     getMediaObjectId,
     groupBy,
     isHlsMedia,
     uniq,
 } from 'utils';
+import {NoMusicLibraryError} from 'services/errors';
 import {getPlaybackId} from 'services/mediaPlayback/playback';
 import embySettings, {EmbySettings} from './embySettings';
 
@@ -153,7 +155,8 @@ async function getFilters(
     itemType: ItemType,
     settings: EmbySettings = embySettings
 ): Promise<readonly MediaFilter[]> {
-    const key = `${settings.serverId}:${itemType}:${filterType}`;
+    const libraryId = getMusicLibraryId();
+    const key = `${settings.serverId}:${libraryId}:${itemType}:${filterType}`;
     if (!filtersCache[key]) {
         switch (filterType) {
             case FilterType.ByDecade:
@@ -185,7 +188,7 @@ async function fetchEmbyFilters(
 ): Promise<readonly MediaFilter[]> {
     const params = {
         UserId: settings.userId,
-        ParentId: settings.libraryId,
+        ParentId: getMusicLibraryId(),
         IncludeItemTypes: 'Audio',
         SortBy: 'SortName',
         Recursive: true,
@@ -263,6 +266,14 @@ async function getMusicLibraries(
     );
 }
 
+export function getMusicLibraryId(): string {
+    const libraryId = getLibraryIdFromPath() ?? embySettings.libraryId;
+    if (!libraryId) {
+        throw new NoMusicLibraryError();
+    }
+    return libraryId;
+}
+
 async function login(
     host: string,
     Username: string,
@@ -281,7 +292,7 @@ async function login(
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'X-Emby-Authorization': authorization,
+            [`${isEmby ? 'X-Emby-' : ''}Authorization`]: authorization,
         },
         body: useProxy ? '' : JSON.stringify({Username, Pw}),
     });
@@ -327,6 +338,7 @@ async function embyFetch(
     settings: EmbySettings = embySettings
 ): Promise<Response> {
     const {apiHost, device, deviceId, token} = settings;
+    const isEmby = settings.serviceId === 'emby';
     if (!token) {
         throw Error('No access token');
     }
@@ -337,7 +349,7 @@ async function embyFetch(
     init.headers = {
         ...init.headers,
         Accept: 'application/json',
-        'X-Emby-Authorization': `MediaBrowser Client="${__app_name__}", Version="${__app_version__}", Device="${device}", DeviceId="${deviceId}", Token="${token}"`,
+        [`${isEmby ? 'X-Emby-' : ''}Authorization`]: `MediaBrowser Client="${__app_name__}", Version="${__app_version__}", Device="${device}", DeviceId="${deviceId}", Token="${token}"`,
     };
     const response = await fetch(`${apiHost}/${path}`, init);
     if (!response.ok) {
@@ -358,6 +370,7 @@ function getPlayableUrl(item: MediaItem, settings: EmbySettings = embySettings):
                     Static: 'true',
                     UserId: userId,
                     DeviceId: deviceId,
+                    ApiKey: token, // Jellyfin
                     api_key: token,
                     PlaySessionId,
                 });
@@ -366,6 +379,7 @@ function getPlayableUrl(item: MediaItem, settings: EmbySettings = embySettings):
                 const videoParams = new URLSearchParams({
                     MediaSourceId: mediaSourceId || id,
                     DeviceId: deviceId,
+                    ApiKey: token, // Jellyfin
                     api_key: token,
                     TranscodeReasons: 'ContainerNotSupported',
                     VideoCodec: 'h264,h265,hevc',
@@ -385,6 +399,7 @@ function getPlayableUrl(item: MediaItem, settings: EmbySettings = embySettings):
                 },m4b|aac,flac,webma,webm|webma,wav,ogg`,
                 AudioCodec: 'aac',
                 UserId: userId,
+                ApiKey: token, // Jellyfin
                 api_key: token,
                 DeviceId: deviceId,
                 EnableRedirection: 'true',
@@ -411,6 +426,7 @@ async function getPlaybackType(
                 Static: 'true',
                 UserId: userId,
                 DeviceId: deviceId,
+                ApiKey: token, // Jellyfin
                 api_key: token,
             });
             const url = `${apiHost}/Videos/${id}/stream?${videoParams}`;

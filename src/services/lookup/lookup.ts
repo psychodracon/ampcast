@@ -14,7 +14,7 @@ import {
     isPersonalMediaService,
     isPlayableSrc,
 } from 'services/mediaServices';
-import {bestOf, getArtistAndTitle, filterMatches, removeFeaturedArtists} from 'services/metadata';
+import {bestOf, getArtistAndTitle, findMatches, removeFeaturedArtists} from 'services/metadata';
 import soundcloudApi from 'services/soundcloud/soundcloudApi';
 import youtubeApi from 'services/youtube/youtubeApi';
 import {
@@ -137,7 +137,7 @@ class Lookup {
             }
         }
 
-        matches = filterMatches(matches, item, isrcs);
+        matches = findMatches(matches, item, isrcs);
 
         if (lookupSettings.preferPersonalMedia) {
             matches = filterNotEmpty(matches, (match) => {
@@ -249,12 +249,12 @@ class Lookup {
                         .replace(/['"]/g, ' ')
                         .replace(/\s\s+/g, ' ');
                 const matches = await service.lookup(
-                    searchString(item.albumArtist || removeFeaturedArtists(artist)),
+                    searchString(item.albumArtists?.join(', ') || removeFeaturedArtists(artist)),
                     searchString(removeFeaturedArtists(title)),
                     10,
                     5_000
                 );
-                return filterMatches(matches, item, isrcs, strict);
+                return findMatches(matches, item, isrcs, strict);
             }
         } catch (err) {
             logger.error(err);
@@ -274,9 +274,9 @@ class Lookup {
         if (services.length === 0) {
             return [];
         } else {
-            const matches = await Promise.all([
-                ...services.map((service) => this.serviceLookup(service, item, isrcs)),
-            ]);
+            const matches = await Promise.all(
+                services.map((service) => this.serviceLookup(service, item, isrcs))
+            );
             return matches.flat();
         }
     }
@@ -287,9 +287,9 @@ class Lookup {
         if (services.length === 0) {
             return [];
         } else {
-            const matches = await Promise.all([
-                ...services.map((service) => service.lookupByISRC!(isrcs, 10, 2000)),
-            ]);
+            const matches = await Promise.all(
+                services.map((service) => service.lookupByISRC!(isrcs, 10, 2000))
+            );
             return matches.flat();
         }
     }

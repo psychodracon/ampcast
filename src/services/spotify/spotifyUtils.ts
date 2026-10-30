@@ -87,7 +87,7 @@ function createMediaAlbum(album: SpotifyAlbum, inLibrary?: boolean | undefined):
         externalUrl,
         shareLink: externalUrl,
         title: album.name,
-        artist: album.artists.map((artist) => artist.name).join(', '),
+        artists: album.artists?.map((artist) => artist.name),
         // genres: album.genres, // always an empty array
         year: releaseDate.getFullYear(),
         releasedAt: Math.round(releaseDate.getTime() / 1000),
@@ -100,6 +100,10 @@ function createMediaAlbum(album: SpotifyAlbum, inLibrary?: boolean | undefined):
             .filter((text) => !!text)
             .join(' | '),
         addedAt: album.added_at ? Math.floor((new Date(album.added_at).getTime() || 0) / 1000) : 0,
+        links: {
+            self: true,
+            artists: album.artists?.map((artist) => getArtistLink(artist)),
+        },
     };
 }
 
@@ -124,6 +128,9 @@ export function createSortableMediaArtist(
             : createArtistAlbumsPager(artist),
         inLibrary,
         addedAt: artist.added_at,
+        links: {
+            self: true,
+        },
     };
 }
 
@@ -159,6 +166,9 @@ function createMediaPlaylist(
                   moveable: (trackCount || 0) <= SpotifyPlaylistItemsPager.MAX_SIZE_FOR_REORDER,
               }
             : undefined,
+        links: {
+            self: true,
+        },
     };
     mediaPlaylist.pager = new SpotifyPlaylistItemsPager(mediaPlaylist as MediaPlaylist);
     return mediaPlaylist as MediaPlaylist;
@@ -181,7 +191,7 @@ export function createMediaItemFromTrack(
         shareLink: externalUrl,
         title: track.name,
         artists: track.artists?.map((artist) => artist.name),
-        albumArtist: album?.artists.map((artist) => artist.name).join(', '),
+        albumArtists: album?.artists?.map((artist) => artist.name),
         album: album?.name,
         duration: track.duration_ms / 1000,
         playedAt: track.played_at
@@ -199,6 +209,12 @@ export function createMediaItemFromTrack(
         explicit: track.explicit,
         inLibrary,
         addedAt: track.added_at ? Math.floor((new Date(track.added_at).getTime() || 0) / 1000) : 0,
+        links: {
+            self: true,
+            album: album?.uri,
+            artists: track.artists?.map((artist) => artist.uri),
+            albumArtists: album?.artists?.map((artist) => getArtistLink(artist)),
+        },
     };
 }
 
@@ -259,11 +275,14 @@ function createArtistTopTracks(artist: SpotifyArtist): MediaAlbum {
         itemType: ItemType.Album,
         src: `spotify:top-tracks:${artist.id}`,
         title: 'Top Tracks',
-        artist: artist.name,
+        artists: [artist.name],
         // thumbnails: artist.images as Thumbnail[], // Spotify branding rules
         pager: createTopTracksPager(artist),
         trackCount: undefined,
         synthetic: true,
+        links: {
+            artists: [artist.uri],
+        },
     };
 }
 
@@ -309,4 +328,8 @@ function createAlbumTracksPager(album: SpotifyAlbum): Pager<MediaItem> {
             {autofill: true, autofillInterval: 500, autofillMaxPages: 10}
         );
     }
+}
+
+function getArtistLink(artist: SpotifyApi.ArtistObjectSimplified): string {
+    return artist.name === 'Various Artists' ? '' : artist.uri;
 }

@@ -1,36 +1,62 @@
-import React, {memo, useCallback, useState} from 'react';
+import React, {memo, useCallback, useEffect, useRef} from 'react';
+import {skip} from 'rxjs';
+import {getServiceFromPath, isPersonalMediaService} from 'services/mediaServices';
 import AppTitle from 'components/App/AppTitle';
-import Splitter from 'components/Splitter';
-import {SettingsDialog} from 'components/Settings';
-import {showDialog} from 'components/Dialog';
 import AppDragRegion from 'components/App/AppDragRegion';
-import {IconButton} from 'components/Button';
-import MediaSources, {MediaSourceView} from 'components/MediaSources';
+import BrowserControls from 'components/MediaBrowser/BrowserControls';
+import BrowserHistory from 'components/MediaBrowser/BrowserHistory';
+import MediaSources from 'components/MediaSources';
+import Splitter from 'components/Splitter';
+import {TreeViewHandle} from 'components/TreeView';
+import useHistory from 'components/MediaBrowser/useHistory';
+import {ResizeRect} from 'hooks/useOnResize';
+import SettingsButton from './SettingsButton';
 import './MediaLibrary.scss';
 
 export default memo(function MediaLibrary() {
-    const [source, setSource] = useState<MediaSourceView | null>(null);
+    const ref = useRef<HTMLDivElement | null>(null);
+    const sourcesRef = useRef<TreeViewHandle>(null);
+    const {currentPath, navigateTo, switchLibrary} = useHistory();
+    const service = getServiceFromPath(currentPath);
 
-    const openSettingsDialog = useCallback(() => {
-        showDialog(SettingsDialog, true);
+    useEffect(() => {
+        const [path] = currentPath.split('?');
+        if (path) {
+            sourcesRef.current?.scrollIntoView(path);
+        }
+    }, [currentPath]);
+
+    useEffect(() => {
+        if (service && isPersonalMediaService(service)) {
+            const subscription = service
+                .observeLibraryId?.()
+                .pipe(skip(1))
+                .subscribe(switchLibrary);
+            return () => subscription?.unsubscribe();
+        }
+    }, [service, switchLibrary]);
+
+    const handleSourcesResize = useCallback(({width}: ResizeRect) => {
+        ref.current?.style.setProperty('--sources-width', `${width}px`);
     }, []);
 
     return (
-        <div className="media-library">
+        <div className="media-library" ref={ref}>
             <header className="media-library-head">
                 <AppTitle />
                 <AppDragRegion />
-                <IconButton
-                    icon="settings"
-                    className="in-frame"
-                    title="Settings"
-                    onClick={openSettingsDialog}
-                />
+                <BrowserControls />
+                <SettingsButton />
             </header>
             <div className="media-library-body">
                 <Splitter id="media-library-layout" arrange="columns">
-                    <MediaSources onSelect={setSource} />
-                    {source?.view || <div className="panel" />}
+                    <MediaSources
+                        onClick={navigateTo}
+                        onSelect={navigateTo}
+                        onResize={handleSourcesResize}
+                        ref={sourcesRef}
+                    />
+                    <BrowserHistory />
                 </Splitter>
             </div>
         </div>

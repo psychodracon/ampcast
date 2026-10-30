@@ -80,16 +80,16 @@ export class ListenBrainzApi {
             } else {
                 const chunks = chunk(lookupItems, MAX_LOOKUPS_PER_POST).slice(0, 4); // Max four requests
                 result = (
-                    await Promise.all([
-                        ...chunks.map((items) =>
+                    await Promise.all(
+                        chunks.map((items) =>
                             this.post<ListenBrainz.LookupMetadata[]>('metadata/lookup/', {
                                 recordings: items.map(({title, artists}) => ({
                                     recording_name: title,
                                     artist_name: artists![0],
                                 })),
                             })
-                        ),
-                    ])
+                        )
+                    )
                 ).flat();
                 this.addMetadataLastCall = {key, result};
             }

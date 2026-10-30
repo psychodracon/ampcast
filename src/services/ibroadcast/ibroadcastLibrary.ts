@@ -1,22 +1,20 @@
 import type {Observable} from 'rxjs';
-import {
-    BehaviorSubject,
-    Subject,
-    distinctUntilChanged,
-    filter,
-    fromEvent,
-    map,
-    skipWhile,
-    tap,
-} from 'rxjs';
+import {BehaviorSubject, Subject, distinctUntilChanged, filter, skipWhile, tap} from 'rxjs';
 import MiniSearch from 'minisearch';
 import MediaFilter from 'types/MediaFilter';
+import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import {Logger, uniq} from 'utils';
 import {observeIsLoggedIn} from 'services/mediaServices';
 import {dispatchMetadataChanges, localeCompare} from 'services/metadata';
 import ibroadcastApi from './ibroadcastApi';
-import {createMediaPlaylist, getGenres, getIdFromSrc, getSystemPlaylistId} from './ibroadcastUtils';
+import {
+    createMediaObject,
+    createMediaPlaylist,
+    getGenres,
+    getIdFromSrc,
+    getSystemPlaylistId,
+} from './ibroadcastUtils';
 
 const logger = new Logger('ibroadcastLibrary');
 
@@ -56,10 +54,10 @@ export interface IBroadcastLibraryQuery<T extends iBroadcast.LibrarySection> {
 
 export class IBroadcastLibrary {
     private readonly change$ = new Subject<IBroadcastLibraryChange>();
-    private readonly id$ = new BehaviorSubject(1);
     private readonly loading$ = new BehaviorSubject(true);
     private readonly searchFields = ['title', 'artist', 'album', 'genre'];
     // Caches.
+    private _library: iBroadcast.Library | undefined; // Use sparingly.
     private libraryPromise: Promise<iBroadcast.Library> | undefined;
     private albumArtistIds: readonly number[] | undefined;
     private albumsDiscIds: Record<string, readonly string[]> | undefined;
@@ -73,11 +71,9 @@ export class IBroadcastLibrary {
             .pipe(
                 skipWhile((isLoggedIn) => !isLoggedIn),
                 filter((isLoggedIn) => !isLoggedIn),
-                tap(() => this.clear())
+                tap(() => this.clearCaches())
             )
             .subscribe(logger);
-
-        fromEvent(window, 'pagehide').subscribe(() => this.clear());
     }
 
     observeChanges<T extends iBroadcast.LibrarySection>(
@@ -86,10 +82,6 @@ export class IBroadcastLibrary {
         return this.change$.pipe(filter((change) => change.section === section)) as Observable<
             IBroadcastLibraryChange<T>
         >;
-    }
-
-    observeId(): Observable<string> {
-        return this.id$.pipe(map((id) => String(id)));
     }
 
     observeLoading(): Observable<boolean> {
@@ -114,10 +106,6 @@ export class IBroadcastLibrary {
         );
     }
 
-    get id(): string {
-        return String(this.id$.value);
-    }
-
     get loading(): boolean {
         return this.loading$.value;
     }
@@ -126,15 +114,18 @@ export class IBroadcastLibrary {
         if (!this.libraryPromise) {
             this.loading$.next(true);
             this.libraryPromise = ibroadcastApi.getLibrary();
-            this.libraryPromise.then(() => this.loading$.next(false));
+            this.libraryPromise.then((library) => {
+                this._library = library;
+                this.loading$.next(false);
+            });
         }
-        return this.libraryPromise!;
+        return this.libraryPromise;
     }
 
-    reload(): void {
+    async reload(): Promise<void> {
         if (!this.loading) {
-            this.clear();
-            this.load().then(() => this.id$.next(this.id$.value + 1));
+            this.clearCaches();
+            await this.load();
         }
     }
 
@@ -228,6 +219,18 @@ export class IBroadcastLibrary {
         }
     }
 
+    getAlbumId(library: iBroadcast.Library, discId: number): number {
+        const key = this.getAlbumKey(library, discId);
+        const albumsDiscIds = this.getAlbumsDiscIds(library);
+        return (albumsDiscIds[key]?.map(Number) || [0])[0];
+    }
+
+    getAlbumDiscIds(library: iBroadcast.Library, discId: number): readonly number[] {
+        const key = this.getAlbumKey(library, discId);
+        const albumsDiscIds = this.getAlbumsDiscIds(library);
+        return albumsDiscIds[key]?.map(Number) || [];
+    }
+
     getAlbumTracks(library: iBroadcast.Library, id: number): readonly number[] {
         const albums = library.albums;
         const tracks = library.tracks;
@@ -312,6 +315,12 @@ export class IBroadcastLibrary {
         return this.genres[section];
     }
 
+    async getMediaObject<T extends MediaObject>(src: string): Promise<T> {
+        const library = await this.load();
+        const [, type, id] = src.split(':');
+        return createMediaObject(`${type}s` as iBroadcast.LibrarySection, Number(id), library);
+    }
+
     async getPlaylistByName(name: string): Promise<MediaPlaylist | undefined> {
         const library = await this.load();
         const playlists = library.playlists;
@@ -319,6 +328,23 @@ export class IBroadcastLibrary {
         const id = Object.keys(playlists).find((id) => playlists[id][map.name] === name);
         if (id) {
             return createMediaPlaylist(Number(id), library);
+        }
+    }
+
+    getRelatedPlaylistsSync(trackId: number): readonly number[] {
+        if (this._library) {
+            const playlists = this._library.playlists;
+            const map = playlists.map;
+            return Object.keys(playlists)
+                .filter(
+                    (id) =>
+                        id !== 'map' &&
+                        playlists[id][map.tracks].includes(trackId) &&
+                        !playlists[id][map.type]
+                )
+                .map(Number);
+        } else {
+            return [];
         }
     }
 
@@ -358,8 +384,8 @@ export class IBroadcastLibrary {
     async rateAlbum(id: number, rating: number): Promise<void> {
         const library = await this.load();
         const discs = this.getAlbumDiscIds(library, id);
-        discs.forEach((id) => this.updateRating(library, 'albums', Number(id), rating));
-        await Promise.all(discs.map((id) => ibroadcastApi.rateAlbum(Number(id), rating)));
+        discs.forEach((id) => this.updateRating(library, 'albums', id, rating));
+        await Promise.all(discs.map((id) => ibroadcastApi.rateAlbum(id, rating)));
     }
 
     async rateArtist(id: number, rating: number): Promise<void> {
@@ -472,14 +498,13 @@ export class IBroadcastLibrary {
         }
     }
 
-    private clear(): void {
+    private clearCaches(): void {
         this.libraryPromise = undefined;
         this.albumArtistIds = undefined;
         this.albumsDiscIds = undefined;
         this.decades = {};
         this.genres = {};
         this.searches = {};
-        this.loading$.next(true);
     }
 
     private dispatchDataChange<T extends iBroadcast.LibrarySection>(
@@ -528,12 +553,6 @@ export class IBroadcastLibrary {
             this.albumArtistIds = [...albumArtistIds];
         }
         return this.albumArtistIds;
-    }
-
-    private getAlbumDiscIds(library: iBroadcast.Library, id: number): readonly string[] {
-        const key = this.getAlbumKey(library, id);
-        const albumsDiscIds = this.getAlbumsDiscIds(library);
-        return albumsDiscIds[key] || [];
     }
 
     private getAlbumsDiscIds(library: iBroadcast.Library): Record<string, readonly string[]> {

@@ -1,4 +1,5 @@
 import type {Observable} from 'rxjs';
+import type {BaseItemDto} from '@jellyfin/sdk/lib/generated-client';
 import Action from 'types/Action';
 import CreatePlaylistOptions from 'types/CreatePlaylistOptions';
 import FilterType from 'types/FilterType';
@@ -10,18 +11,21 @@ import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
-import MediaSource from 'types/MediaSource';
+import MediaType from 'types/MediaType';
 import Pager, {PagerConfig} from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
 import PersonalMediaService from 'types/PersonalMediaService';
 import PlaybackType from 'types/PlaybackType';
-import Pin, {Pinnable} from 'types/Pin';
 import ServiceType from 'types/ServiceType';
+import {getMediaObjectId} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
-import {bestOf} from 'services/metadata';
+import {createRadioStation} from 'services/mediaServices/mediaSources';
+import {bestOf, findMatches} from 'services/metadata';
+import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
 import SimplePager from 'services/pagers/SimplePager';
-import fetchFirstPage, {fetchFirstItem} from 'services/pagers/fetchFirstPage';
+import fetchFirstPage from 'services/pagers/fetchFirstPage';
 import {t} from 'services/i18n';
+import WrappedPager from 'services/pagers/WrappedPager';
 import {
     observeConnecting,
     observeConnectionLogging,
@@ -36,15 +40,15 @@ import EmbyPager from './EmbyPager';
 import embySettings from './embySettings';
 import embyApi from './embyApi';
 import embyScrobbler from './embyScrobbler';
-import {embyPlaylistItemsSort} from './embySorting';
 import embySources, {
-    createItemsPager,
+    createRelatedPlaylistsSource,
     createSearchPager,
+    createSourceFromObject,
+    createSourceFromPin,
     embyEditablePlaylists,
-    embyPlaylistLayout,
     embySearch,
 } from './embySources';
-import {createPlaylistItemsPager} from './embyUtils';
+import {createArtistVideosPager, createMediaObject, createRelatedItemsPager} from './embyUtils';
 
 const serviceId: MediaServiceId = 'emby';
 
@@ -54,6 +58,7 @@ const emby: PersonalMediaService = {
     name: 'Emby',
     url: 'https://emby.media',
     serviceType: ServiceType.PersonalMedia,
+    browsable: true,
     root: embySearch,
     sources: embySources,
     labels: {
@@ -89,6 +94,10 @@ const emby: PersonalMediaService = {
     compareForRating,
     createPlaylist,
     createRadioPager,
+    createRelatedItemsPager,
+    createRelatedPlaylistsSource,
+    createSongsPager,
+    createSourceFromObject,
     createSourceFromPin,
     editPlaylist,
     getFilters,
@@ -159,45 +168,42 @@ async function createPlaylist<T extends MediaItem>(
 }
 
 function createRadioPager(item: MediaItem): Pager<MediaItem> {
-    const [, type, id] = item.src.split(':');
-    if (type !== 'artist-radio') {
+    if (item.linearType !== LinearType.Station) {
         throw Error('Not supported');
     }
+    const id = getMediaObjectId(item);
     return new EmbyPager(`Items/${id}/InstantMix`, {UserId: embySettings.userId});
 }
 
-function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
-    if (pin.itemType !== ItemType.Playlist) {
-        throw Error('Unsupported Pin type.');
+function createSongsPager(item: MediaItem): Pager<MediaItem> {
+    const songsPager = new SimpleMediaPager(async () => [item]);
+    if (item.mediaType === MediaType.Video) {
+        return songsPager;
+    } else {
+        const radiosPager = new SimpleMediaPager(async () => {
+            const id = getMediaObjectId(item);
+            const radio = createRadioStation({
+                src: `${serviceId}:song-radio:${id}`,
+                title: `${item.title} - Radio`,
+                thumbnails: item.thumbnails,
+            });
+            return [radio];
+        });
+        const audiosPager = new WrappedPager(undefined, songsPager, radiosPager);
+        if (embySettings.videoLibraryId) {
+            const artistLink = item.links?.artists?.[0];
+            if (artistLink) {
+                const videosPager = new SimpleMediaPager<MediaItem>(async () => {
+                    const [, , artistId] = artistLink.split(':');
+                    const artistVideosPager = createArtistVideosPager(artistId);
+                    const artistVideos = await fetchFirstPage(artistVideosPager);
+                    return findMatches(artistVideos, item);
+                });
+                return new WrappedPager(undefined, audiosPager, videosPager);
+            }
+        }
+        return audiosPager;
     }
-    return {
-        title: pin.title,
-        itemType: pin.itemType,
-        id: pin.src,
-        sourceId: `${serviceId}/pinned-playlist`,
-        icon: 'pin',
-        isPin: true,
-        primaryItems: {
-            layout: embyPlaylistLayout,
-        },
-        secondaryItems: {
-            sort: embyPlaylistItemsSort,
-        },
-
-        search(): Pager<MediaPlaylist> {
-            return createItemsPager(
-                {
-                    ids: getIdFromSrc(pin),
-                    IncludeItemTypes: 'Playlist',
-                },
-                {
-                    childSort: embyPlaylistItemsSort.defaultSort,
-                    childSortId: `${serviceId}/pinned-playlist/2`,
-                },
-                createPlaylistItemsPager
-            );
-        },
-    } as MediaSource<T>;
 }
 
 async function editPlaylist(playlist: MediaPlaylist): Promise<MediaPlaylist> {
@@ -231,11 +237,8 @@ async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
 
 async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
     const id = getIdFromSrc({src});
-    const pager = new EmbyPager<T>(`Users/${embySettings.userId}/Items/${id}`, undefined, {
-        pageSize: 1,
-        maxSize: 1,
-    });
-    return fetchFirstItem<T>(pager, {timeout: 2000});
+    const object = await embyApi.get<BaseItemDto>(`Users/${embySettings.userId}/Items/${id}`);
+    return createMediaObject(object);
 }
 
 function getPlayableUrl(item: MediaItem): string {

@@ -8,8 +8,10 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId, {ScrobblerId} from 'types/MediaServiceId';
 import MediaSource, {AnyMediaSource, MediaMultiSource, MediaSourceItems} from 'types/MediaSource';
 import Pager from 'types/Pager';
+import Pin, {Pinnable} from 'types/Pin';
 import {observePlaybackState} from 'services/mediaPlayback/playback';
 import {localeCompare} from 'services/metadata';
+import ErrorPager from 'services/pagers/ErrorPager';
 import ObservablePager from 'services/pagers/ObservablePager';
 import WrappedPager from 'services/pagers/WrappedPager';
 import {recentlyPlayedTracksLayout} from 'components/MediaList/layouts';
@@ -42,6 +44,41 @@ export const localPlaylistItems: MediaSourceItems<LocalPlaylistItem> = {
     sort: localPlaylistItemsSort,
     itemKey: 'id',
 };
+
+export function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
+    if (pin.itemType !== ItemType.Playlist) {
+        throw Error('Unsupported Pin type.');
+    }
+    return {
+        title: pin.title,
+        itemType: pin.itemType,
+        id: pin.src,
+        sourceId: `${serviceId}/pinned-playlist`,
+        icon: 'pin',
+        isPin: true,
+        singular: true,
+        primaryItems: {
+            layout: localPlaylistLayout,
+        },
+        secondaryItems: localPlaylistItems,
+
+        search(): Pager<MediaPlaylist> {
+            if (playlists.getLocalPlaylist(pin.src)) {
+                return playlists.search(
+                    {
+                        filter: (playlist) => playlist.src === pin.src,
+                    },
+                    {
+                        childSort: localPlaylistItemsSort.defaultSort,
+                        childSortId: `${serviceId}/pinned-playlist/2`,
+                    }
+                );
+            } else {
+                return new ErrorPager(() => Error('Not found'));
+            }
+        },
+    } as MediaSource<T>;
+}
 
 export const localScrobbles: MediaSource<MediaItem> = {
     id: `${serviceId}/scrobbles`,
@@ -175,7 +212,7 @@ function createUnscrobbled(scrobblerId: ScrobblerId, title: string): MediaSource
                 views: [],
             },
             itemKey: 'playedAt',
-            emptyMessage: 'No unscrobbled tracks',
+            emptyMessage: 'No unscrobbled tracks.',
         },
 
         search(): Pager<Listen> {

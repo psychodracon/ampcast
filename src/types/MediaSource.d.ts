@@ -49,10 +49,11 @@ export default interface MediaSource<T extends MediaObject = MediaObject> {
         : never;
     readonly searchable?: boolean;
     readonly searchPlaceholder?: string;
+    readonly singular?: boolean; // Single item as primary item.
     readonly defaultHidden?: boolean;
     readonly disabled?: boolean;
     readonly isPin?: boolean;
-    readonly lockActionsStore?: boolean;
+    readonly lockActionType?: 'inLibrary' | 'rating';
     readonly Component?: MediaSourceComponent;
     search(
         params?: SearchParams | MediaFilter | Record<string, unknown>,
@@ -68,11 +69,11 @@ export type MediaMultiSource<T extends MediaObject = MediaObject> = Pick<
     | 'searchable'
     | 'defaultHidden'
     | 'disabled'
-    | 'lockActionsStore'
     | 'Component'
 > & {
     readonly itemType?: never;
     readonly isPin?: false;
+    readonly singular?: false;
     readonly sources: readonly MediaSource<T>[];
 };
 

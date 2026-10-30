@@ -1,7 +1,7 @@
 declare namespace Subsonic {
     interface Artist {
-        readonly albumCount: number;
-        readonly coverArt: string;
+        readonly albumCount?: number;
+        readonly coverArt?: string;
         readonly id: string;
         readonly name: string;
         readonly starred?: string;
@@ -43,7 +43,15 @@ declare namespace Subsonic {
         readonly year?: number;
         readonly song?: Song[];
         // OpenSubsonic extensions
+        readonly artists?: readonly Artist[];
+        readonly displayArtist?: string;
+        readonly explicitStatus?: 'explicit' | 'clean' | '';
+        readonly genres?: readonly ItemGenre[];
+        readonly isCompilation?: boolean;
         readonly musicBrainzId?: string;
+        readonly originalReleaseDate?: ItemDate;
+        readonly releaseDate?: ItemDate;
+        readonly releaseTypes?: readonly string[];
     }
 
     interface AlbumInfo {
@@ -82,21 +90,33 @@ declare namespace Subsonic {
         readonly type: 'music';
         readonly year?: number;
         // OpenSubsonic extensions.
-        readonly albumArtist?: string;
-        readonly albumArtists?: readonly {
-            readonly id: string;
-            readonly name: string;
-        }[];
+        readonly albumArtists?: readonly Artist[];
+        readonly artists?: readonly Artist[];
         readonly bitDepth?: number;
         readonly bpm?: number;
-        readonly musicBrainzId?: string;
+        readonly comment?: string;
+        readonly displayAlbumArtist?: string;
+        readonly displayArtist?: string;
+        readonly explicitStatus?: 'explicit' | 'clean' | '';
+        readonly genres?: readonly ItemGenre[];
         readonly isrc?: readonly string[];
+        readonly musicBrainzId?: string;
         readonly replayGain?: {
             readonly albumGain: number;
             readonly albumPeak: number;
             readonly trackGain: number;
             readonly trackPeak: number;
         };
+    }
+
+    interface ItemDate {
+        readonly year: number;
+        readonly month: number;
+        readonly day: number;
+    }
+
+    interface ItemGenre {
+        readonly name: string;
     }
 
     interface Video {
@@ -130,17 +150,20 @@ declare namespace Subsonic {
     }
 
     interface Playlist {
+        readonly allowedUser?: readonly string[];
         readonly changed: string;
-        readonly comment: string;
-        readonly coverArt: string;
+        readonly comment?: string;
+        readonly coverArt?: string;
         readonly created: string;
         readonly duration: number;
         readonly id: string;
         readonly name: string;
-        readonly owner: string;
-        readonly public: boolean;
+        readonly owner?: string;
+        readonly public?: boolean;
         readonly songCount: number;
         readonly entry?: MediaItem[];
+        // OpenSubsonic extensions.
+        readonly readonly?: boolean;
     }
 
     interface Genre {
@@ -243,6 +266,7 @@ declare namespace Subsonic {
         | 'songLyrics'
         | 'sonicSimilarity'
         | 'template'
+        | 'topSongsByArtistId'
         | 'transcodeOffset'
         | 'transcoding';
 

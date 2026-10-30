@@ -1,5 +1,5 @@
 import type {Observable} from 'rxjs';
-import {distinctUntilChanged, fromEvent, map, Subject, tap} from 'rxjs';
+import {distinctUntilChanged, map, Subject, tap} from 'rxjs';
 import butterchurn from 'butterchurn';
 import AudioManager from 'types/AudioManager';
 import {ButterchurnVisualizer, VisualizerReason} from 'types/Visualizer';
@@ -35,11 +35,6 @@ export default class ButterchurnPlayer extends AbstractVisualizerPlayer<Butterch
                 tap(() => this.toggleOpacity())
             )
             .subscribe(logger);
-
-        fromEvent(window, 'pagehide').subscribe(() => {
-            this.#visualizer?.disconnectAudio(this.source);
-            this.#visualizer = undefined;
-        });
 
         // Log errors.
         this.error$.subscribe(logger.error);

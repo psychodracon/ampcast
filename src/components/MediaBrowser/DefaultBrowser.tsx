@@ -1,6 +1,5 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useRef, useState} from 'react';
 import MediaSource, {AnyMediaSource, MediaMultiSource} from 'types/MediaSource';
-import actionsStore from 'services/actions/actionsStore';
 import SearchBar from 'components/SearchBar';
 import useSearch from 'hooks/useSearch';
 import {MediaBrowserProps} from './MediaBrowser';
@@ -19,21 +18,8 @@ export default function DefaultBrowser({service, source}: MediaBrowserProps) {
     const [query, setQuery] = useState('');
     const pager = useSearch(selectedSource, query);
     const searchable = !!source.searchable;
-    const showPagerHeader = !searchable && !source.isPin;
+    const showPagerHeader = !searchable && !source.isPin && !source.singular;
     const isSearch = !!query;
-
-    useEffect(() => {
-        if (selectedSource?.lockActionsStore) {
-            actionsStore.lock(service.id, selectedSource.itemType);
-        } else {
-            actionsStore.unlock();
-        }
-    }, [service, selectedSource]);
-
-    useEffect(() => {
-        // Commit unsaved changes.
-        return () => actionsStore.unlock();
-    }, [selectedSource]);
 
     const handleTextChange = useCallback((text: string) => {
         textRef.current = text;
@@ -71,7 +57,7 @@ export default function DefaultBrowser({service, source}: MediaBrowserProps) {
                     withButtons={searchable}
                     isSearch={isSearch}
                 />
-            ) : showPagerHeader || selectedSource.isPin ? null : (
+            ) : showPagerHeader || source.isPin || source.singular ? null : (
                 <MenuBar source={selectedSource} isSearch={isSearch} />
             )}
             <PagedItems
@@ -79,7 +65,7 @@ export default function DefaultBrowser({service, source}: MediaBrowserProps) {
                 source={selectedSource}
                 pager={pager}
                 loadingText={query ? 'Searching' : undefined}
-                emptyMessage={query ? 'No results' : undefined}
+                emptyMessage={query ? 'No results.' : undefined}
                 isSearchResult={isSearch}
                 key={`${selectedSource?.id}?q=${query}`}
             />

@@ -58,7 +58,6 @@ export default class HTML5Player implements Player<MediaItem> {
         element.muted = mediaType === MediaType.Video;
         element.volume = 1;
         element.autoplay = false;
-        element.preload = 'metadata';
         element.crossOrigin = 'anonymous';
 
         // Load new items.

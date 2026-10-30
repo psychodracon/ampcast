@@ -2,6 +2,7 @@ import {Primitive} from 'type-fest';
 import MediaFilter from 'types/MediaFilter';
 import MediaPlaylist from 'types/MediaPlaylist';
 import {Page} from 'types/Pager';
+import {getLibraryIdFromPath} from 'utils';
 import navidromeSettings from './navidromeSettings';
 
 async function get<T>(path: string, params?: Record<string, Primitive>): Promise<T> {
@@ -156,6 +157,10 @@ async function navidromeFetch(
         throw response;
     }
     return response;
+}
+
+export function getMusicLibraryId(): string {
+    return getLibraryIdFromPath() ?? navidromeSettings.libraryId;
 }
 
 const navidromeApi = {

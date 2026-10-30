@@ -9,7 +9,7 @@ import {Logger, mediaTypes, toUtf8, uniq} from 'utils';
 import {MAX_DURATION} from 'services/constants';
 import lastfmApi from 'services/lastfm/lastfmApi';
 import mixcloudApi from 'services/mixcloud/mixcloudApi';
-import musicbrainzApi from 'services/musicbrainz/musicbrainzApi';
+import musicbrainzApi, {MBMediaItem} from 'services/musicbrainz/musicbrainzApi';
 import soundcloudApi from 'services/soundcloud/soundcloudApi';
 import youtubeApi from 'services/youtube/youtubeApi';
 import {createMediaItemFromStream} from './music-metadata-js';
@@ -29,7 +29,12 @@ export async function addMetadata<T extends MediaItem>(item: T): Promise<T> {
         const transposedItem = {...item, title: artist, artists: [title]};
 
         // First use MusicBrainz API.
-        const mbItems = await musicbrainzApi.search(artist, title);
+        let mbItems: readonly MBMediaItem[] = [];
+        try {
+            mbItems = await musicbrainzApi.search(artist, title);
+        } catch (err) {
+            logger.error(err);
+        }
         let mbItem = musicbrainzApi.findBestMatch(mbItems, item);
         if (!mbItem) {
             mbItem = musicbrainzApi.findBestMatch(mbItems, transposedItem);
@@ -99,15 +104,36 @@ export function bestOf<T extends MediaObject>(a: T, b: Partial<T> = {}): T {
         // Don't set album details if albums don't match.
         if (a.album !== (b as any).album) {
             if (a.album) {
-                result.albumArtist = a.albumArtist;
+                result.albumArtists = a.albumArtists;
                 result.track = a.track;
             } else {
-                result.albumArtist = (b as any).albumArtist;
+                result.albumArtists = (b as any).albumArtists;
                 result.track = (b as any).track;
             }
         }
     }
     return result;
+}
+
+export function createLookupFromTitle(text = ''): MediaItem | null {
+    const [artist, title] = splitTitle(text);
+    return createLookupItem(artist, title);
+}
+
+function createLookupItem(artist = '', title = ''): MediaItem | null {
+    if (artist && title) {
+        return {
+            title,
+            artists: [artist],
+            src: '',
+            itemType: ItemType.Media,
+            mediaType: MediaType.Audio,
+            duration: 0,
+            playedAt: 0,
+        };
+    } else {
+        return null;
+    }
 }
 
 export async function createMediaItemFromTitle(text = ''): Promise<MediaItem | null> {
@@ -119,16 +145,8 @@ export async function createMediaItemFromArtistAndTitle(
     artist = '',
     title = ''
 ): Promise<MediaItem | null> {
-    if (artist && title) {
-        const lookupItem: MediaItem = {
-            title,
-            artists: [artist],
-            src: '',
-            itemType: ItemType.Media,
-            mediaType: MediaType.Audio,
-            duration: 0,
-            playedAt: 0,
-        };
+    const lookupItem = createLookupItem(artist, title);
+    if (lookupItem) {
         const foundItem = await addMetadata(lookupItem);
         if (foundItem === lookupItem) {
             return null;

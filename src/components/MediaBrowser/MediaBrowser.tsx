@@ -8,11 +8,14 @@ import {isPersonalMediaService} from 'services/mediaServices';
 import Login from 'components/Login';
 import useIsLibraryLoading from 'hooks/useIsLibraryLoading';
 import useIsLoggedIn from 'hooks/useIsLoggedIn';
+import useIsServiceVisible from 'hooks/useIsServiceVisible';
+import BrowserContexts from './BrowserContexts';
 import DefaultBrowser from './DefaultBrowser';
 import ErrorScreen from './ErrorScreen';
 import FilterBrowser from './FilterBrowser';
 import FolderBrowser from './FolderBrowser';
 import LibraryLoadingScreen from './LibraryLoadingScreen';
+import ServiceHidden from './ServiceHidden';
 import useErrorScreen from './useErrorScreen';
 import useNoInternetError from './useNoInternetError';
 
@@ -22,6 +25,7 @@ export interface MediaBrowserProps {
 }
 
 export default function MediaBrowser({service, source}: MediaBrowserProps) {
+    const isServiceVisible = useIsServiceVisible(service);
     const isLoggedIn = useIsLoggedIn(service);
     const isLibraryLoading = useIsLibraryLoading(service);
     const renderError = useErrorScreen(service, source);
@@ -45,14 +49,18 @@ export default function MediaBrowser({service, source}: MediaBrowserProps) {
 
     return (
         <div className={`media-browser ${service.id}-browser`}>
-            {noInternetError ? (
+            {!isServiceVisible ? (
+                <ServiceHidden service={service} source={source} />
+            ) : noInternetError ? (
                 <ErrorScreen error={noInternetError} reportingId={service?.id} service={service} />
             ) : isLoggedIn ? (
                 isLibraryLoading ? (
                     <LibraryLoadingScreen service={service} />
                 ) : (
                     <ErrorBoundary fallbackRender={renderError}>
-                        <Browser service={service} source={source} />
+                        <BrowserContexts>
+                            <Browser service={service} source={source} />
+                        </BrowserContexts>
                     </ErrorBoundary>
                 )
             ) : (

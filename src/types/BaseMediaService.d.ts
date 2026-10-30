@@ -24,6 +24,7 @@ type BaseMediaService = Auth & {
     readonly url: string;
     compareForRating: <T extends MediaObject>(a: T, b: T) => boolean; // TODO: Make optional.
     // Everything below here should be optional.
+    readonly browsable?: boolean;
     readonly root?: AnyMediaSource;
     readonly sources?: readonly AnyMediaSource[];
     readonly listingName?: string; // Longer name for disambiguation
@@ -37,14 +38,14 @@ type BaseMediaService = Auth & {
     readonly icons?: Partial<Record<LibraryAction, IconName>>;
     readonly labels?: Partial<Record<LibraryAction, string>>;
     readonly editablePlaylists?: MediaSource<MediaPlaylist>;
-    readonly starRatingIncrement?: 0.5 | 1;
+    readonly starRatingIncrement?: 0.5 | 1; // Default is 1.
     readonly Components?: {
         readonly Credentials?: React.FC<{service: MediaService}>;
         readonly Login?: React.FC<{service: MediaService}>;
         // Radio stations.
-        EditStationDialog?: React.FC<DialogProps & {station: MediaItem}>;
-        CreateStationDialog?: React.FC<DialogProps>;
-        ManageStations?: React.FC<{service: MediaService}>;
+        readonly EditStationDialog?: React.FC<DialogProps & {station: MediaItem}>;
+        readonly CreateStationDialog?: React.FC<DialogProps>;
+        readonly ManageStations?: React.FC<{service: MediaService}>;
     };
     // For services that play audio in an iframe.
     readonly iframeAudioPlayback?:
@@ -63,7 +64,7 @@ type BaseMediaService = Auth & {
         items: readonly MediaItem[],
         position?: number
     ) => Promise<void>;
-    bulkRate?: (items: readonly MediaObject[], rating: number) => Promise<void>;
+    bulkRate?: (items: readonly MediaObject[], ratings: readonly number[]) => Promise<void>;
     bulkStore?: (items: readonly MediaObject[], inLibrary: boolean) => Promise<void>;
     canPin?: (item: MediaObject, inListView?: boolean) => boolean;
     canRate?: (item: MediaObject, inListView?: boolean) => boolean;
@@ -73,6 +74,13 @@ type BaseMediaService = Auth & {
         options?: CreatePlaylistOptions<T>
     ) => Promise<MediaPlaylist>;
     createRadioPager?: (radio: MediaItem) => Pager<MediaItem>;
+    createRelatedItemsPager?: <T extends MediaObject>(item: T) => Pager<T> | undefined;
+    createRelatedPlaylistsSource?: <T extends MediaObject>(
+        item: T
+    ) => MediaSource<MediaPlaylist> | undefined;
+    createShareLink?: (item: MediaObject) => Promise<string>;
+    createSongsPager?: (song: MediaItem) => Pager<T>;
+    createSourceFromObject?: <T extends MediaObject>(src: string) => MediaSource<T>;
     createSourceFromPin?: <T extends Pinnable>(pin: Pin) => MediaSource<T>;
     deletePlaylist?: (playlist: MediaPlaylist) => Promise<void>;
     editPlaylist?: (playlist: MediaPlaylist) => Promise<MediaPlaylist>;

@@ -1,4 +1,4 @@
-import React, {useCallback, useId, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useId, useRef, useState} from 'react';
 import Tab from './Tab';
 import TabPanel from './TabPanel';
 import './TabList.scss';
@@ -6,26 +6,42 @@ import './TabList.scss';
 export interface TabItem {
     readonly tab: React.ReactNode;
     readonly panel: React.ReactNode;
+    readonly id?: string;
 }
 
 export interface TabListProps {
-    className?: string;
     label: string;
-    items: TabItem[];
+    items: readonly TabItem[];
+    className?: string;
+    onTabIndexChange?: (tabIndex: number) => void;
+    onTabSelect?: (tabId: string | undefined) => void;
 }
 
-export default function TabList({label, items, className = ''}: TabListProps) {
+export default function TabList({
+    label,
+    items,
+    className = '',
+    onTabIndexChange,
+    onTabSelect,
+}: TabListProps) {
     const id = useId();
     const tabsRef = useRef<HTMLUListElement>(null);
-    const [buttons, setButtons] = useState<HTMLButtonElement[]>([]);
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const selectedItem = items[selectedIndex];
 
     useEffect(() => {
-        setButtons(Array.from(tabsRef.current!.querySelectorAll('button')));
-    }, []);
+        onTabIndexChange?.(selectedIndex);
+    }, [selectedIndex, onTabIndexChange]);
+
+    useEffect(() => {
+        if (selectedItem) {
+            onTabSelect?.(selectedItem.id);
+        }
+    }, [selectedItem, onTabSelect]);
 
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent) => {
+            const buttons = Array.from(tabsRef.current!.querySelectorAll('button'));
             let currentIndex = selectedIndex;
             if (event.code === 'ArrowRight') {
                 event.stopPropagation();
@@ -40,7 +56,7 @@ export default function TabList({label, items, className = ''}: TabListProps) {
                 button.focus();
             }
         },
-        [selectedIndex, buttons]
+        [selectedIndex]
     );
 
     const handleFocus = useCallback((event: React.FocusEvent) => {

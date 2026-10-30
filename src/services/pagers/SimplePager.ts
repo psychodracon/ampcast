@@ -32,7 +32,9 @@ export default class SimplePager<T> implements Pager<T> {
         // do nothing
     }
 
-    disconnect(): void {
-        this.items.forEach((item) => (item as any)?.pager?.disconnect());
+    disconnect(keepChildrenConnected?: boolean): void {
+        if (!keepChildrenConnected) {
+            this.items.forEach((item) => (item as any)?.pager?.disconnect());
+        }
     }
 }

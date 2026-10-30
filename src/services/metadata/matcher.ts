@@ -1,6 +1,6 @@
 import unidecode from 'unidecode';
 import MediaItem from 'types/MediaItem';
-import {filterNotEmpty, fuzzyCompare} from 'utils';
+import {filterNotEmpty, fuzzyCompare, removeSymbols} from 'utils';
 import {localeCompare} from './sorter';
 
 const regFeaturedArtists = /\s*[\s[({](with\s|featuring\s|feat[\s.]+|ft[\s.]+).+$/i;
@@ -18,11 +18,11 @@ export function findBestMatch<T extends MediaItem>(
     if (!artist || !title) {
         return;
     }
-    return filterMatches(items, item, isrcs, strict)[0];
+    return findMatches(items, item, isrcs, strict)[0];
 }
 
 // TODO: This is too slow for a large amount of items.
-export function filterMatches<T extends MediaItem>(
+export function findMatches<T extends MediaItem>(
     items: readonly T[],
     item: MediaItem,
     isrcs: readonly string[] = [],
@@ -119,11 +119,11 @@ function compareArtist<T extends MediaItem>(match: MediaItem, item: T, strict: b
     if (compareString(removeFeaturedArtists(artist), removeFeaturedArtists(matchedArtist))) {
         return true;
     }
-    const albumArtist = item.albumArtist;
+    const albumArtist = item.albumArtists?.[0];
     if (albumArtist && compareString(normalize(albumArtist), normalize(matchedArtist))) {
         return true;
     }
-    if (compareString(removeFeaturedArtists(artist), match.albumArtist)) {
+    if (compareString(removeFeaturedArtists(artist), match.albumArtists?.[0])) {
         return true;
     }
     if (compareMultiArtist(match, item)) {
@@ -325,11 +325,8 @@ function stringIncludes(a: string, b = ''): boolean {
 function normalize(string: string, removeTagsAndSymbols?: boolean): string {
     let result = unidecode(string.replaceAll(' & ', ' and ').replace(/\s\s+/g, ' ').trim());
     if (removeTagsAndSymbols) {
-        result = result
-            .replace(/^\[[^\]]*\]\s*|\s*\[[^\]]*\]$|\s*\([^)]*\)$/g, '') // remove tags
-            .replace(/[\x21-\x2f]|[\x3a-\x40]|[\x5b-\x60]|[\x7b-\x7f]/g, '') // remove symbols
-            .replace(/\s\s+/g, ' ')
-            .trim();
+        result = result.replace(/^\[[^\]]*\]\s*|\s*\[[^\]]*\]$|\s*\([^)]*\)$/g, ''); // remove tags
+        result = removeSymbols(result);
     }
     return result;
 }

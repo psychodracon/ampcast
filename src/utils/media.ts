@@ -57,6 +57,21 @@ export function canPlayMedia(type: 'audio' | 'video', src: string): Promise<bool
     });
 }
 
+export function getItemTypeFromSrc(src: string): ItemType {
+    const [, type = ''] = src.split(':');
+    if (type.includes('artist')) {
+        return ItemType.Artist;
+    } else if (type.includes('playlist')) {
+        return ItemType.Playlist;
+    } else if (type.includes('album')) {
+        return ItemType.Album;
+    } else if (type.includes('folder')) {
+        return ItemType.Folder;
+    } else {
+        return ItemType.Media;
+    }
+}
+
 export function getMediaLabel(itemType: ItemType, serviceId?: string): string {
     switch (itemType) {
         case ItemType.Playlist:
@@ -90,16 +105,29 @@ export function getMediaLabel(itemType: ItemType, serviceId?: string): string {
 }
 
 export function getMediaObjectId(object: {src: string}): string {
-    const [, , id] = object.src.split(':');
-    return id;
+    const [serviceId, , ...rest] = object.src.split(':');
+    if (serviceId === 'emby') {
+        return rest[0] || '';
+    } else {
+        return rest.join(':');
+    }
 }
 
 export function getServiceId(object: {src: string}): string {
-    const [id] = object.src.split(':');
-    return id;
+    const [serviceId] = object.src.split(':');
+    return serviceId;
 }
 
 export async function isHlsMedia(url: string): Promise<boolean> {
     const contentType = await getContentType(url);
     return mediaTypes.hls.includes(contentType);
+}
+
+export function srcToPath(src: string): string {
+    const [serviceId, type, ...rest] = src.split(':');
+    return `${serviceId}/${type}/${rest.join(':')}`;
+}
+
+export function getLibraryIdFromPath(): string | undefined {
+    return history.state?.libraryId;
 }

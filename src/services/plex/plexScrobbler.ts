@@ -29,12 +29,11 @@ const logger = new Logger('plexScrobbler');
 
 export function scrobble(): void {
     const stopped$ = new Subject<void>();
-    const killed$ = new Subject<void>();
     const isPlexItem = (state: PlaybackState): boolean =>
         state.currentItem?.src.startsWith('plex:') || false;
 
     fromEvent(window, 'pagehide').subscribe(() => {
-        killed$.next();
+        stopped$.next();
         if (isLoggedIn()) {
             const currentItem = playback.currentItem;
             if (currentItem?.src.startsWith('plex:')) {
@@ -49,7 +48,6 @@ export function scrobble(): void {
             filter(isPlexItem),
             debounceTime(2000),
             mergeMap(({currentItem}) => reportStart(currentItem!)),
-            takeUntil(killed$)
         )
         .subscribe(logger);
 
@@ -59,7 +57,6 @@ export function scrobble(): void {
             filter(isPlexItem),
             tap(() => stopped$.next()),
             mergeMap(({currentItem}) => reportStop(currentItem!)),
-            takeUntil(killed$)
         )
         .subscribe(logger);
 
@@ -85,7 +82,6 @@ export function scrobble(): void {
             mergeMap(({currentItem, currentTime, paused}) =>
                 reportProgress(currentItem!, currentTime, paused ? 'paused' : 'playing')
             ),
-            takeUntil(killed$)
         )
         .subscribe(logger);
 }

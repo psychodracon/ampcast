@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useImperativeHandle, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {browser} from 'utils';
 import {IconName} from 'components/Icon';
 import Scrollable, {
@@ -26,17 +26,19 @@ export interface TreeNode<T> {
 
 export interface TreeViewHandle {
     focus: () => void;
+    scrollIntoView: (id: string) => void;
 }
 
 export interface TreeViewProps<T> {
     roots: readonly TreeNode<T>[];
     className?: string;
     storageId?: string;
-    onContextMenu?: (item: T, x: number, y: number, button: number) => void;
-    onDelete?: (item: T) => void;
-    onEnter?: (item: T) => void;
-    onInfo?: (item: T) => void;
-    onSelect?: (item: T | null) => void;
+    onClick?: (value: T) => void;
+    onContextMenu?: (value: T, x: number, y: number, button: number) => void;
+    onDelete?: (value: T) => void;
+    onEnter?: (value: T) => void;
+    onInfo?: (value: T) => void;
+    onSelect?: (value: T) => void;
     ref?: React.RefObject<TreeViewHandle | null>;
 }
 
@@ -48,6 +50,7 @@ export default function TreeView<T>({
     roots,
     className = '',
     storageId,
+    onClick,
     onContextMenu,
     onDelete,
     onEnter,
@@ -70,7 +73,7 @@ export default function TreeView<T>({
     const [height, setHeight] = useState(0);
     const [rowHeight, setRowHeight] = useState(defaultRowHeight);
     const [scrollTop, setScrollTop] = useState(0);
-    const pageSize = Math.floor(height / rowHeight) - 1;
+    const pageSize = Math.max(Math.floor(height / rowHeight) - 1, 0);
     const size = visibleIds.length;
     const selectedValue = getValue(roots, selectedId);
     const keyboardBusy = useKeyboardBusy(scrollKeys);
@@ -83,14 +86,46 @@ export default function TreeView<T>({
     const minimalWidth = fontSize * 4 > clientWidth;
     const rowBottom = (rowIndex + 1) * rowHeight;
 
-    useImperativeHandle(ref, () => ({
-        focus: () => {
-            containerRef.current?.focus();
+    const scrollTo = useCallback(
+        (id: string, firstScroll?: boolean) => {
+            const rowIndex = visibleIds.indexOf(id);
+            if (!firstScroll || rowIndex >= pageSize - 1) {
+                const parentNodeId = getParentNodeId(roots, id);
+                const topIndex = visibleIds.indexOf(parentNodeId || id);
+                const top = topIndex * rowHeight;
+                scrollableRef.current?.scrollTo({top});
+            }
         },
-    }));
+        [roots, visibleIds, pageSize, rowHeight]
+    );
 
-    useOnResize(containerRef, ({width}) => setClientWidth(width));
-    useOnResize(cursorRef, ({height}) => setRowHeight(height), 'border-box');
+    useEffect(() => {
+        if (ref) {
+            ref.current = {
+                focus: () => {
+                    containerRef.current?.focus();
+                },
+                scrollIntoView: (id: string) => {
+                    if (id !== selectedId && visibleIds.includes(id)) {
+                        scrollTo(id);
+                        setSelectedId(id);
+                    }
+                },
+            };
+        }
+    }, [ref, selectedId, visibleIds, scrollTo]);
+
+    useOnResize(containerRef, ({width}) => {
+        setClientWidth(width);
+    });
+
+    useOnResize(
+        cursorRef,
+        ({height}) => {
+            setRowHeight(height);
+        },
+        'border-box'
+    );
 
     useEffect(() => {
         if (noSelection && hasVisibleNodes) {
@@ -113,16 +148,9 @@ export default function TreeView<T>({
     useEffect(() => {
         if (!hasScrolled && selectedId) {
             setHasScrolled(true);
-
-            const rowIndex = visibleIds.indexOf(selectedId);
-            if (rowIndex >= pageSize - 1) {
-                const parentNodeId = getParentNodeId(roots, selectedId);
-                const topIndex = visibleIds.indexOf(parentNodeId || selectedId);
-                const top = topIndex * rowHeight;
-                scrollableRef.current?.scrollTo({top});
-            }
+            scrollTo(selectedId, true);
         }
-    }, [roots, selectedId, visibleIds, pageSize, hasScrolled, rowHeight]);
+    }, [hasScrolled, selectedId, scrollTo]);
 
     useEffect(() => {
         onSelect?.(debouncedValue);
@@ -139,6 +167,14 @@ export default function TreeView<T>({
             setDebouncedValue(selectedValue);
         }
     }, [selectedValue, busy]);
+
+    const handleClick = useCallback(
+        (id: string) => {
+            const value = getValue(roots, id);
+            onClick?.(value);
+        },
+        [roots, onClick]
+    );
 
     const handleContextMenu = useCallback(
         (event: React.MouseEvent) => {
@@ -281,6 +317,7 @@ export default function TreeView<T>({
                             setSize={roots.length}
                             emptyMarker={true}
                             showTooltip={showTooltip}
+                            onClick={handleClick}
                             onSelect={setSelectedId}
                             onToggle={toggle}
                             key={id}

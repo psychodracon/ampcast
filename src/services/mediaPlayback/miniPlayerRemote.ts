@@ -1,14 +1,4 @@
-import {
-    debounceTime,
-    filter,
-    firstValueFrom,
-    fromEvent,
-    map,
-    merge,
-    race,
-    takeUntil,
-    timer,
-} from 'rxjs';
+import {debounceTime, filter, firstValueFrom, fromEvent, map, race, timer} from 'rxjs';
 import {Writable} from 'type-fest';
 import MediaPlayback from 'types/MediaPlayback';
 import PlaybackState from 'types/PlaybackState';
@@ -46,7 +36,6 @@ const connect = (
 
     const beforeunload$ = fromEvent(window, 'beforeunload');
     const pagehide$ = fromEvent(window, 'pagehide');
-    const killed$ = merge(pagehide$, beforeunload$);
 
     const getTitle = ({artists: [artist] = [], title}: PlaylistItem): string => {
         return artist ? `${artist} - ${title}` : title;
@@ -119,25 +108,16 @@ const connect = (
     mediaPlayer.observeEnded().subscribe(() => emitEvent('ended'));
     mediaPlayer
         .observeError()
-        .pipe(
-            map((error: any) => String(error?.message || 'unknown')),
-            takeUntil(killed$)
-        )
+        .pipe(map((error: any) => String(error?.message || 'unknown')))
         .subscribe((error) => emitEvent('error', error));
 
     playback
         .observePlaybackState()
-        .pipe(
-            filter(() => !suspended),
-            takeUntil(killed$)
-        )
+        .pipe(filter(() => !suspended))
         .subscribe((state) => emitEvent('playback-state-change', state));
 
     observeCurrentVisualizer()
-        .pipe(
-            filter(() => !suspended),
-            takeUntil(killed$)
-        )
+        .pipe(filter(() => !suspended))
         .subscribe(({providerId, name}) => emitEvent('visualizer-change', {providerId, name}));
 
     fromEvent(window, 'resize')

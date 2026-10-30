@@ -5,7 +5,6 @@ import LinearType from 'types/LinearType';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
-import MediaSource from 'types/MediaSource';
 import {browser} from 'utils';
 import {isListen} from 'services/localdb/listens';
 import {getService, getServiceFromSrc} from 'services/mediaServices';
@@ -20,18 +19,25 @@ import usePager from 'hooks/usePager';
 import {getLabelForAction} from './Actions';
 import {AddToPlaylistMenuItem} from './PlaylistActions';
 
-export async function showActionsMenu<T extends MediaObject>(
-    items: readonly T[],
-    target: HTMLElement,
-    x: number,
-    y: number,
-    align: 'left' | 'right' = 'left',
-    actionsMenuProps?: Pick<ActionsMenuProps<T>, 'inListView' | 'parentPlaylist' | 'source'>
-): Promise<Action | undefined> {
+export interface ShowActionsMenuParams<T> {
+    items: readonly T[];
+    target: HTMLElement;
+    x: number;
+    y: number;
+    align?: 'left' | 'right';
+    inListView?: boolean;
+    parentPlaylist?: MediaPlaylist;
+}
+
+export async function showActionsMenu<T extends MediaObject>({
+    target,
+    x,
+    y,
+    align = 'left',
+    ...params
+}: ShowActionsMenuParams<T>): Promise<Action | undefined> {
     return showPopupMenu(
-        (props: PopupMenuProps<Action>) => (
-            <ActionsMenu {...props} items={items} {...actionsMenuProps} />
-        ),
+        (props: PopupMenuProps<Action>) => <ActionsMenu {...props} {...params} />,
         target,
         x,
         y,
@@ -39,18 +45,15 @@ export async function showActionsMenu<T extends MediaObject>(
     );
 }
 
-export interface ActionsMenuProps<T extends MediaObject> {
-    items: readonly T[];
-    inListView?: boolean;
-    parentPlaylist?: MediaPlaylist;
-    source?: MediaSource<any>;
-}
+export type ActionsMenuProps<T extends MediaObject> = Pick<
+    ShowActionsMenuParams<T>,
+    'items' | 'inListView' | 'parentPlaylist'
+>;
 
 export default function ActionsMenu<T extends MediaObject>({
     items,
     inListView,
     parentPlaylist,
-    source,
     ...props
 }: PopupMenuProps<Action> & ActionsMenuProps<T>) {
     return (
@@ -59,7 +62,6 @@ export default function ActionsMenu<T extends MediaObject>({
                 items={items}
                 inListView={inListView}
                 parentPlaylist={parentPlaylist}
-                source={source}
             />
         </PopupMenu>
     );
@@ -69,7 +71,6 @@ export function ActionsMenuItems<T extends MediaObject>({
     items,
     inListView,
     parentPlaylist,
-    source,
 }: ActionsMenuProps<T>) {
     const item = items[0];
     const isSingleItem = items.length === 1 && !!item;
@@ -83,9 +84,7 @@ export function ActionsMenuItems<T extends MediaObject>({
     return (
         <>
             {allPlayable ? <PlayActions disabled={!playableNow} /> : null}
-            {isSingleItem ? (
-                <ContextualActions item={item} inListView={inListView} source={source} />
-            ) : null}
+            {isSingleItem ? <ContextualActions item={item} inListView={inListView} /> : null}
             {parentPlaylist?.items?.deletable ? (
                 <>
                     <PopupMenuItem
@@ -151,14 +150,9 @@ function PlayActions({disabled}: PlayActionsProps) {
 interface ContextualActionsProps<T extends MediaObject> {
     item: T;
     inListView?: boolean;
-    source?: MediaSource<any>;
 }
 
-function ContextualActions<T extends MediaObject>({
-    item,
-    inListView,
-    source,
-}: ContextualActionsProps<T>) {
+function ContextualActions<T extends MediaObject>({item, inListView}: ContextualActionsProps<T>) {
     const service = getServiceFromSrc(item);
     const internetRadio = getService('internet-radio');
 
@@ -200,7 +194,7 @@ function ContextualActions<T extends MediaObject>({
             !isListen(item) &&
             internetRadio.canStore?.(item, inListView) ? (
                 <>
-                    {source?.id === 'internet-radio/my-stations' ? (
+                    {item.editable ? (
                         <PopupMenuItem<Action>
                             label="Edit station…"
                             value={Action.EditStation}

@@ -9,9 +9,11 @@ export interface TabPanelProps {
 }
 
 export default function TabPanel({id, item, index, hidden}: TabPanelProps) {
+    const className = item.id ? `tab-panel-${item.id}` : '';
+
     return (
         <div
-            className="tab-panel"
+            className={`tab-panel ${className}`}
             id={`${id}-panel-${index}`}
             hidden={hidden}
             role="tabpanel"

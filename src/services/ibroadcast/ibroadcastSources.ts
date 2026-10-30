@@ -12,13 +12,14 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import MediaSource, {AnyMediaSource, MediaMultiSource, MediaSourceItems} from 'types/MediaSource';
 import Pager from 'types/Pager';
-import {shuffle, uniq} from 'utils';
+import Pin, {Pinnable} from 'types/Pin';
+import {getItemTypeFromSrc, shuffle} from 'utils';
+import {createSingularMediaSource} from 'services/mediaServices/mediaSources';
 import SimplePager from 'services/pagers/SimplePager';
 import {
     albumsLayout,
     artistsLayout,
     defaultMediaItemCard,
-    mediaItemsLayout,
     mostPlayedTracksLayout,
     topTracksLayout,
 } from 'components/MediaList/layouts';
@@ -29,15 +30,13 @@ import {
     createArtistAlbumsPager,
     createPlaylistItemsPager,
     getGenres,
+    getIdFromSrc,
     sortAlbums,
     sortByTitle,
     sortTracks,
 } from './ibroadcastUtils';
 
 const serviceId: MediaServiceId = 'ibroadcast';
-
-const ibroadcastTracksLayout: MediaListLayout = addRating(mediaItemsLayout);
-const ibroadcastAlbumsLayout: MediaListLayout = addRating(albumsLayout);
 
 const ibroadcastArtistAlbumsSort: MediaListSort = {
     sortOptions: {
@@ -50,7 +49,7 @@ const ibroadcastArtistAlbumsSort: MediaListSort = {
     },
 };
 
-export const ibroadcastPlaylistLayout: Partial<MediaListLayout> = {
+export const ibroadcastPlaylistsLayout: Partial<MediaListLayout> = {
     card: {
         h1: 'Name',
         h2: 'Genre',
@@ -83,13 +82,90 @@ export const ibroadcastPlaylistItems: MediaSourceItems<SetRequired<MediaItem, 'p
     sort: ibroadcastPlaylistItemsSort,
 };
 
-const ibroadcastTracks: MediaSourceItems<MediaItem> = {
-    layout: ibroadcastTracksLayout,
-};
+export function createSourceFromObject<T extends MediaObject>(src: string): MediaSource<T> {
+    const itemType = getItemTypeFromSrc(src);
+    switch (itemType) {
+        case ItemType.Artist:
+            return createSingularMediaSource<MediaArtist>({
+                src,
+                itemType,
+                secondaryItems: {
+                    sort: ibroadcastArtistAlbumsSort,
+                },
+                childSort: ibroadcastArtistAlbumsSort.defaultSort,
+                createChildPager: createArtistAlbumsPager,
+            }) as MediaSource<T>;
 
-const ibroadcastAlbums: MediaSourceItems<MediaAlbum> = {
-    layout: ibroadcastAlbumsLayout,
-};
+        case ItemType.Playlist:
+            return createSingularMediaSource<MediaPlaylist>({
+                src,
+                itemType,
+                primaryItems: {
+                    layout: ibroadcastPlaylistsLayout,
+                },
+                secondaryItems: ibroadcastPlaylistItems,
+                childSort: ibroadcastPlaylistItemsSort.defaultSort,
+                createChildPager: createPlaylistItemsPager,
+            }) as MediaSource<T>;
+
+        default:
+            return createSingularMediaSource<T>({
+                src,
+                itemType,
+            });
+    }
+}
+
+export function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
+    return createSingularMediaSource<MediaPlaylist>({
+        src: pin.src,
+        itemType: ItemType.Playlist,
+        isPin: true,
+        primaryItems: {
+            layout: ibroadcastPlaylistsLayout,
+        },
+        secondaryItems: ibroadcastPlaylistItems,
+        childSort: ibroadcastPlaylistItemsSort.defaultSort,
+        createChildPager: createPlaylistItemsPager,
+    }) as MediaSource<T>;
+}
+
+export function createRelatedPlaylistsSource<T extends MediaObject>(
+    item: T
+): MediaSource<MediaPlaylist> | undefined {
+    switch (item.itemType) {
+        case ItemType.Media: {
+            const trackId = getIdFromSrc(item);
+            const playlists = ibroadcastLibrary.getRelatedPlaylistsSync(trackId);
+            if (playlists.length > 0) {
+                const sourceId = `${serviceId}/playlists`;
+                return {
+                    id: `${item.src}/playlists`,
+                    sourceId,
+                    title: 'Related Playlists',
+                    icon: 'playlist',
+                    itemType: ItemType.Playlist,
+                    primaryItems: {
+                        layout: ibroadcastPlaylistsLayout,
+                    },
+                    secondaryItems: ibroadcastPlaylistItems,
+
+                    search(): Pager<MediaPlaylist> {
+                        return new IBroadcastPager(
+                            'playlists',
+                            async () => playlists,
+                            {
+                                childSort: ibroadcastPlaylistItemsSort.defaultSort,
+                                childSortId: `${sourceId}/2`,
+                            },
+                            createPlaylistItemsPager
+                        );
+                    },
+                };
+            }
+        }
+    }
+}
 
 export const ibroadcastSearch: MediaMultiSource = {
     id: `${serviceId}/search`,
@@ -102,7 +178,6 @@ export const ibroadcastSearch: MediaMultiSource = {
             title: 'Tracks',
             primaryItems: {
                 layout: {
-                    ...ibroadcastTracksLayout,
                     view: 'details',
                 },
             },
@@ -110,7 +185,6 @@ export const ibroadcastSearch: MediaMultiSource = {
         createSearch<MediaAlbum>(ItemType.Album, {
             id: 'albums',
             title: 'Albums',
-            primaryItems: ibroadcastAlbums,
         }),
         createSearch<MediaArtist>(ItemType.Artist, {
             id: 'artists',
@@ -121,24 +195,11 @@ export const ibroadcastSearch: MediaMultiSource = {
         createSearch<MediaPlaylist>(ItemType.Playlist, {
             id: 'playlists',
             title: 'Playlists',
-            primaryItems: {layout: ibroadcastPlaylistLayout},
+            primaryItems: {layout: ibroadcastPlaylistsLayout},
             secondaryItems: ibroadcastPlaylistItems,
         }),
     ],
 };
-
-// const ibroadcastThumbsUp: MediaSource<MediaItem> = {
-//     id: `${serviceId}/thumbs-up`,
-//     title: 'Thumbs Up',
-//     icon: 'thumbs-up',
-//     itemType: ItemType.Media,
-//     defaultHidden: true,
-//     primaryItems: ibroadcastTracks,
-
-//     search(): Pager<MediaItem> {
-//         return new IBroadcastSystemItemsPager('thumbsup');
-//     },
-// };
 
 const ibroadcastTopTracks: MediaSource<MediaItem> = {
     id: `${serviceId}/top-tracks`,
@@ -165,14 +226,15 @@ const ibroadcastTopTracks: MediaSource<MediaItem> = {
 
 const ibroadcastTopAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/top-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'Top Albums',
     icon: 'star',
     itemType: ItemType.Album,
     primaryItems: {
         layout: {
-            ...ibroadcastAlbumsLayout,
+            ...albumsLayout,
             card: {
-                ...ibroadcastAlbumsLayout.card,
+                ...albumsLayout.card,
                 data: 'Rating',
             },
         },
@@ -191,13 +253,14 @@ const ibroadcastTopAlbums: MediaSource<MediaAlbum> = {
 
 const ibroadcastTopArtists: MediaSource<MediaArtist> = {
     id: `${serviceId}/top-artists`,
+    sourceId: `${serviceId}/artists`,
     title: 'Top Artists',
     icon: 'star',
     itemType: ItemType.Artist,
     defaultHidden: true,
     primaryItems: {
         layout: {
-            ...addRating(artistsLayout),
+            ...artistsLayout,
             card: {
                 ...artistsLayout.card,
                 h3: 'Rating',
@@ -219,7 +282,7 @@ const ibroadcastTopArtists: MediaSource<MediaArtist> = {
                 }),
             {
                 childSort: ibroadcastArtistAlbumsSort.defaultSort,
-                childSortId: `${ibroadcastTopArtists.id}/2`,
+                childSortId: `${ibroadcastTopArtists.sourceId}/2`,
             },
             createArtistAlbumsPager
         );
@@ -231,7 +294,6 @@ const ibroadcastRecentlyAdded: MediaSource<MediaItem> = {
     title: 'Recently Added',
     icon: 'recently-added',
     itemType: ItemType.Media,
-    primaryItems: ibroadcastTracks,
 
     search(): Pager<MediaItem> {
         return new IBroadcastSystemItemsPager('recently-uploaded');
@@ -243,7 +305,6 @@ const ibroadcastRecentlyPlayed: MediaSource<MediaItem> = {
     title: 'Recently Played',
     icon: 'clock',
     itemType: ItemType.Media,
-    primaryItems: ibroadcastTracks,
 
     search(): Pager<MediaItem> {
         return new IBroadcastSystemItemsPager('recently-played');
@@ -281,11 +342,11 @@ export const ibroadcastPlaylists: MediaSource<MediaPlaylist> = {
     icon: 'playlist',
     itemType: ItemType.Playlist,
     primaryItems: {
-        layout: ibroadcastPlaylistLayout,
+        layout: ibroadcastPlaylistsLayout,
         sort: {
             sortOptions: {
                 Name: 'Name',
-                '': 'Date Created',
+                AddedAt: 'Date Created',
             },
             defaultSort: {
                 sortBy: '',
@@ -329,7 +390,6 @@ const ibroadcastTracksByGenre: MediaSource<MediaItem> = {
     filterType: FilterType.ByGenre,
     defaultHidden: true,
     primaryItems: {
-        layout: ibroadcastTracksLayout,
         sort: {
             sortOptions: {
                 Title: 'Title',
@@ -364,12 +424,12 @@ const ibroadcastTracksByGenre: MediaSource<MediaItem> = {
 
 const ibroadcastAlbumsByGenre: MediaSource<MediaAlbum> = {
     id: `${serviceId}/albums-by-genre`,
+    sourceId: `${serviceId}/albums`,
     title: 'Albums by Genre',
     icon: 'genre',
     itemType: ItemType.Album,
     filterType: FilterType.ByGenre,
     primaryItems: {
-        layout: ibroadcastAlbumsLayout,
         sort: {
             sortOptions: {
                 Title: 'Title',
@@ -409,9 +469,6 @@ const ibroadcastTracksByDecade: MediaSource<MediaItem> = {
     itemType: ItemType.Media,
     filterType: FilterType.ByDecade,
     defaultHidden: true,
-    primaryItems: {
-        layout: ibroadcastTracksLayout,
-    },
 
     search(decade?: MediaFilter): Pager<MediaItem> {
         if (decade) {
@@ -435,13 +492,11 @@ const ibroadcastTracksByDecade: MediaSource<MediaItem> = {
 
 const ibroadcastAlbumsByDecade: MediaSource<MediaAlbum> = {
     id: `${serviceId}/albums-by-decade`,
+    sourceId: `${serviceId}/albums`,
     title: 'Albums by Decade',
     icon: 'calendar',
     itemType: ItemType.Album,
     filterType: FilterType.ByDecade,
-    primaryItems: {
-        layout: ibroadcastAlbumsLayout,
-    },
 
     search(decade?: MediaFilter): Pager<MediaAlbum> {
         if (decade) {
@@ -463,9 +518,6 @@ const ibroadcastRandomTracks: MediaSource<MediaItem> = {
     title: 'Random Tracks',
     icon: 'shuffle',
     itemType: ItemType.Media,
-    primaryItems: {
-        layout: ibroadcastTracksLayout,
-    },
 
     search(): Pager<MediaItem> {
         return new IBroadcastPager('tracks', async () => {
@@ -477,12 +529,10 @@ const ibroadcastRandomTracks: MediaSource<MediaItem> = {
 
 const ibroadcastRandomAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/random-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'Random Albums',
     icon: 'shuffle',
     itemType: ItemType.Album,
-    primaryItems: {
-        layout: ibroadcastAlbumsLayout,
-    },
 
     search(): Pager<MediaAlbum> {
         return new IBroadcastPager('albums', async () => {
@@ -560,13 +610,6 @@ function createSearch<T extends MediaObject>(
                     throw TypeError('Search not supported for this type of media');
             }
         },
-    };
-}
-
-function addRating(layout: MediaListLayout): MediaListLayout {
-    return {
-        ...layout,
-        details: uniq(layout.details.concat('Rating')),
     };
 }
 

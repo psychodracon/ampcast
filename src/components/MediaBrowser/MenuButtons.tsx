@@ -1,4 +1,4 @@
-import React, {useCallback} from 'react';
+import React, {useCallback, useContext} from 'react';
 import ItemType from 'types/ItemType';
 import MediaObject from 'types/MediaObject';
 import MediaSource, {MediaSourceItems} from 'types/MediaSource';
@@ -7,8 +7,7 @@ import {getService} from 'services/mediaServices';
 import {IconButton, PopupMenuButton} from 'components/Button';
 import {showCreatePlaylistDialog} from 'components/Actions/CreatePlaylistDialog';
 import {showDialog} from 'components/Dialog';
-import useSyntheticAlbumSource from 'components/MediaBrowser/useSyntheticAlbumSource';
-import {showMediaSourceMenu} from './MediaSourceMenu';
+import {showMediaSourceMenu, SyntheticAlbumContext} from 'components/Actions';
 import './MenuButtons.scss';
 
 export interface MenuButtonsProps<T extends MediaObject> {
@@ -20,8 +19,7 @@ export default function MenuButtons<T extends MediaObject>({
     source,
     isSearch = false,
 }: MenuButtonsProps<T>) {
-    const [syntheticAlbumSource] = useSyntheticAlbumSource();
-
+    const {syntheticAlbum} = useContext(SyntheticAlbumContext);
     const createPlaylist = useCallback(() => {
         const [serviceId] = source.id.split('/');
         showCreatePlaylistDialog([], getService(serviceId));
@@ -39,15 +37,15 @@ export default function MenuButtons<T extends MediaObject>({
         async (button: HTMLButtonElement) => {
             const {right, bottom} = button.getBoundingClientRect();
             await showMediaSourceMenu({
-                source,
                 isSearch,
+                source,
+                syntheticAlbum,
                 target: button,
                 x: right,
                 y: bottom + 4,
-                syntheticAlbumSource,
             });
         },
-        [source, isSearch, syntheticAlbumSource]
+        [isSearch, source, syntheticAlbum]
     );
 
     return (

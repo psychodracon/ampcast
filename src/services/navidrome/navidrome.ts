@@ -9,16 +9,17 @@ import MediaFilter from 'types/MediaFilter';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
-import MediaSource from 'types/MediaSource';
+import MediaType from 'types/MediaType';
 import Pager, {PagerConfig} from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
 import PersonalMediaService from 'types/PersonalMediaService';
-import Pin, {Pinnable} from 'types/Pin';
 import PlaybackType from 'types/PlaybackType';
 import ServiceType from 'types/ServiceType';
-import {getTextFromHtml, Logger} from 'utils';
+import {getMediaObjectId, getTextFromHtml} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
+import {createRadioStation} from 'services/mediaServices/mediaSources';
 import {bestOf} from 'services/metadata';
+import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
 import SimplePager from 'services/pagers/SimplePager';
 import fetchFirstPage, {fetchFirstItem} from 'services/pagers/fetchFirstPage';
 import {t} from 'services/i18n';
@@ -35,20 +36,18 @@ import {
 } from './navidromeAuth';
 import NavidromeIndexedPager from './NavidromeIndexedPager';
 import navidromeSettings from './navidromeSettings';
-import {navidromePlaylistItemsSort} from './navidromeSorting';
 import navidromeSources, {
-    navidromePlaylistItems,
-    navidromePlaylistLayout,
+    createRelatedPlaylistsSource,
+    createSourceFromObject,
+    createSourceFromPin,
     navidromePlaylists,
     navidromeSearch,
 } from './navidromeSources';
 import navidromeApi from './navidromeApi';
 import subsonicApi, {subsonicService} from './subsonicApi';
-import {createPlaylistItemsPager} from './navidromeUtils';
+import {createMediaObject} from './navidromeUtils';
 
 const serviceId: MediaServiceId = 'navidrome';
-
-const logger = new Logger(serviceId);
 
 const navidrome: PersonalMediaService = {
     id: serviceId,
@@ -56,6 +55,7 @@ const navidrome: PersonalMediaService = {
     name: 'Navidrome',
     url: 'https://www.navidrome.org',
     serviceType: ServiceType.PersonalMedia,
+    browsable: true,
     root: navidromeSearch,
     sources: navidromeSources,
     labels: {
@@ -91,11 +91,17 @@ const navidrome: PersonalMediaService = {
     canStore,
     compareForRating,
     createPlaylist,
+    createRelatedItemsPager,
+    createRelatedPlaylistsSource,
+    createSourceFromObject,
     createSourceFromPin,
     editPlaylist,
     createRadioPager,
+    createShareLink,
+    createSongsPager,
     getFilters,
     getLyrics,
+    getMediaObject,
     getPlayableUrl,
     getPlaybackType,
     getServerInfo,
@@ -172,38 +178,6 @@ async function createPlaylist<T extends MediaItem>(
     };
 }
 
-function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
-    if (pin.itemType !== ItemType.Playlist) {
-        throw Error('Unsupported Pin type.');
-    }
-    return {
-        title: pin.title,
-        itemType: pin.itemType,
-        id: pin.src,
-        sourceId: `${serviceId}/pinned-playlist`,
-        icon: 'pin',
-        isPin: true,
-        primaryItems: {
-            layout: navidromePlaylistLayout,
-        },
-        secondaryItems: navidromePlaylistItems,
-
-        search(): Pager<MediaPlaylist> {
-            const id = getIdFromSrc(pin);
-            return new NavidromeIndexedPager(
-                ItemType.Playlist,
-                `playlist/${id}`,
-                undefined,
-                {
-                    childSort: navidromePlaylistItemsSort.defaultSort,
-                    childSortId: `${serviceId}/pinned-playlist/2`,
-                },
-                createPlaylistItemsPager
-            );
-        },
-    } as MediaSource<T>;
-}
-
 async function editPlaylist(playlist: MediaPlaylist): Promise<MediaPlaylist> {
     await navidromeApi.editPlaylist(playlist);
     return playlist;
@@ -226,8 +200,49 @@ async function getLyrics(item: MediaItem): Promise<Lyrics | null> {
     return subsonicApi.getLyrics(item);
 }
 
+const itemTypes: Record<string, ItemType> = {
+    album: ItemType.Album,
+    artist: ItemType.Artist,
+    playlist: ItemType.Playlist,
+    song: ItemType.Media,
+};
+
+async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
+    const [, type, id] = src.split(':');
+    const itemType = itemTypes[type];
+    if (itemType === undefined) {
+        throw Error('Not supported');
+    }
+    const data = await navidromeApi.get<Navidrome.MediaObject>(`${type}/${id}`);
+    return createMediaObject(itemType, data);
+}
+
 function createRadioPager(item: MediaItem): Pager<MediaItem> {
     return subsonicService.createRadioPager(item);
+}
+
+function createRelatedItemsPager<T extends MediaObject>(item: T): Pager<T> | undefined {
+    return subsonicService.createRelatedItemsPager(item);
+}
+
+function createShareLink<T extends MediaObject>(item: T): Promise<string> {
+    return subsonicService.createShareLink(item);
+}
+
+function createSongsPager(item: MediaItem): Pager<MediaItem> {
+    if (item.mediaType === MediaType.Video) {
+        return new SimpleMediaPager(async () => [item]);
+    } else {
+        return new SimpleMediaPager(async () => {
+            const id = getMediaObjectId(item);
+            const radio = createRadioStation({
+                src: `${serviceId}:song-radio:${id}`,
+                title: `${item.title} - Radio`,
+                thumbnails: item.thumbnails,
+            });
+            return [item, radio];
+        });
+    }
 }
 
 async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
@@ -236,34 +251,13 @@ async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
         return item;
     }
     const id = getIdFromSrc(item);
-    if (itemType === ItemType.Album) {
-        if (item.synthetic) {
-            return item;
-        }
-        if (item.description === undefined) {
-            const info = await subsonicApi.getAlbumInfo(id, false);
-            item = {
-                ...item,
-                description: getTextFromHtml(info.notes),
-                release_mbid: info.musicBrainzId,
-            };
-        }
-    } else if (itemType === ItemType.Artist && item.description === undefined) {
+    if (itemType === ItemType.Artist && item.description === undefined) {
         const info = await subsonicApi.getArtistInfo(id);
         item = {
             ...item,
             description: getTextFromHtml(info.biography),
             artist_mbid: info.musicBrainzId,
         };
-    }
-    if ((itemType === ItemType.Media || itemType === ItemType.Album) && !item.shareLink) {
-        try {
-            const shareLink = await subsonicApi.createShare(id);
-            item = {...item, shareLink};
-        } catch (err) {
-            logger.warn(err);
-            logger.info('Could not create share link');
-        }
     }
     if (!canStore(item) || item.inLibrary !== undefined) {
         return item;

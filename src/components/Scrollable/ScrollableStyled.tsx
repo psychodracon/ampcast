@@ -9,10 +9,15 @@ import Scrollbar, {ScrollbarHandle} from './Scrollbar';
 import useScrollableComponents from './useScrollableComponents';
 import './ScrollableStyled.scss';
 
+interface Overflow {
+    x: boolean;
+    y: boolean;
+}
+
 export default function ScrollableStyled({
     children,
-    scrollWidth: initialScrollWidth = 0,
-    scrollHeight: initialScrollHeight = 0,
+    scrollWidth = 0,
+    scrollHeight = 0,
     autoscroll,
     onResize,
     onScroll,
@@ -33,26 +38,17 @@ export default function ScrollableStyled({
         scrollAmountY = lineHeight,
         scrollAmountX = scrollAmountY,
     } = props;
-    const noInitialScrollWidth = initialScrollWidth === 0;
-    const noInitialScrollHeight = initialScrollHeight === 0;
-    const [hScrollbarSize, setHScrollbarSize] = useState(0);
-    const [vScrollbarSize, setVScrollbarSize] = useState(0);
+    const [scrollbarSize, setScrollbarSize] = useState(0);
     const [scrollLeft, setScrollLeft] = useState(0);
     const [scrollTop, setScrollTop] = useState(0);
     const [scrollRect, setScrollRect] = useState<ResizeRect>(() => ({
-        width: initialScrollWidth,
-        height: initialScrollHeight,
+        width: scrollWidth,
+        height: scrollHeight,
     }));
-    const scrollWidth = scrollRect.width;
-    const scrollHeight = scrollRect.height;
     const [innerRect, setInnerRect] = useState<ResizeRect>(() => ({width: 0, height: 0}));
-    const innerWidth = innerRect.width;
-    const innerHeight = innerRect.height;
-    const [overflowX, setOverflowX] = useState(false);
-    const [overflowY, setOverflowY] = useState(false);
+    const [clientRect, setClientRect] = useState<ResizeRect>(() => ({width: 0, height: 0}));
+    const [overflow, setOverflow] = useState<Overflow>({x: false, y: false});
     const [dragOver, setDragOver] = useState(0);
-    const clientWidth = Math.max(innerWidth - (overflowY ? vScrollbarSize : 0), 0);
-    const clientHeight = Math.max(innerHeight - (overflowX ? hScrollbarSize : 0), 0);
     const prevLineHeight = usePrevious(lineHeight);
 
     useImperativeHandle(ref, () => ({
@@ -64,33 +60,55 @@ export default function ScrollableStyled({
                 vScrollbarRef.current!.scrollTo(top);
             }
         },
+        get scrollTop() {
+            return parseFloat(bodyContentRef.current!.dataset.scrollTop!);
+        },
     }));
 
     useEffect(() => {
-        if (scrollWidth && clientWidth) {
-            setOverflowX(scrollWidth - clientWidth > 1);
-        } else {
-            setOverflowX(false);
+        const innerWidth = innerRect.width;
+        const innerHeight = innerRect.height;
+        const scrollWidth = scrollRect.width;
+        const scrollHeight = scrollRect.height;
+        let clientWidth = innerWidth;
+        let overflowX = innerWidth ? scrollWidth - innerWidth > 1 : false;
+        const clientHeight = Math.max(innerHeight - (overflowX ? scrollbarSize : 0), 0);
+        const overflowY = innerHeight ? scrollHeight - clientHeight > 1 : false;
+        if (overflowY) {
+            clientWidth = Math.max(innerWidth - scrollbarSize, 0);
+            overflowX = scrollWidth - clientWidth > 1;
         }
-    }, [scrollWidth, clientWidth]);
+        setClientRect((clientRect) => {
+            const height = clientHeight;
+            const width = clientWidth;
+            return clientRect.width !== width || clientRect.height !== height
+                ? {width, height}
+                : clientRect;
+        });
+        setOverflow((overflow) => {
+            return overflow.x !== overflowX || overflow.y !== overflowY
+                ? {x: overflowX, y: overflowY}
+                : overflow;
+        });
+    }, [innerRect, scrollRect, scrollbarSize]);
 
     useEffect(() => {
-        if (scrollHeight && clientHeight) {
-            setOverflowY(scrollHeight - clientHeight > 1);
-        } else {
-            setOverflowY(false);
-        }
-    }, [scrollHeight, clientHeight]);
+        setScrollRect((scrollRect) => {
+            const width = scrollWidth || contentRef.current!.scrollWidth;
+            const height = scrollHeight || contentRef.current!.scrollHeight;
+            return scrollRect.width !== width || scrollRect.height !== height
+                ? {width, height}
+                : scrollRect;
+        });
+    }, [scrollWidth, scrollHeight]);
 
     useEffect(() => {
-        const width = initialScrollWidth || contentRef.current?.scrollWidth || 0;
-        const height = initialScrollHeight || contentRef.current?.scrollHeight || 0;
-        setScrollRect({width, height});
-    }, [initialScrollWidth, initialScrollHeight]);
-
-    useEffect(() => {
+        const clientWidth = clientRect.width;
+        const clientHeight = clientRect.height;
+        const scrollWidth = scrollRect.width;
+        const scrollHeight = scrollRect.height;
         onResize?.({clientWidth, clientHeight, scrollWidth, scrollHeight});
-    }, [clientWidth, clientHeight, scrollWidth, scrollHeight, onResize]);
+    }, [clientRect, scrollRect, onResize]);
 
     useEffect(() => {
         // Restore scroll position after `lineHeight` change.
@@ -99,30 +117,29 @@ export default function ScrollableStyled({
         }
     }, [lineHeight, prevLineHeight, scrollTop]);
 
-    const onContainerResize = useCallback((rect: ResizeRect) => {
-        if (rect.width * rect.height > 0) {
-            setInnerRect(rect);
-        }
-    }, []);
-
-    const onContentResize = useCallback(() => {
-        setScrollRect((scrollRect) => {
-            const width = noInitialScrollWidth ? contentRef.current!.scrollWidth : scrollRect.width;
-            return width > 0 ? {width, height: scrollRect.height} : scrollRect;
+    const onContainerResize = useCallback(({width, height}: ResizeRect) => {
+        setInnerRect((innerRect) => {
+            return width * height > 0 && (innerRect.width !== width || innerRect.height !== height)
+                ? {width, height}
+                : innerRect;
         });
-    }, [noInitialScrollWidth]);
+    }, []);
 
     const onBodyContentResize = useCallback(() => {
         setScrollRect((scrollRect) => {
-            const height = noInitialScrollHeight
-                ? bodyContentRef.current!.scrollHeight + (headRef.current?.clientHeight || 0)
-                : scrollRect.height;
-            return height > 0 ? {width: scrollRect.width, height} : scrollRect;
+            const width =
+                scrollWidth === 0 ? bodyContentRef.current!.scrollWidth : scrollRect.width;
+            const height =
+                scrollHeight === 0
+                    ? bodyContentRef.current!.scrollHeight + (headRef.current?.clientHeight || 0)
+                    : scrollRect.height;
+            return height > 0 && (scrollRect.width !== width || scrollRect.height !== height)
+                ? {width, height}
+                : scrollRect;
         });
-    }, [noInitialScrollHeight]);
+    }, [scrollWidth, scrollHeight]);
 
     useOnResize(containerRef, onContainerResize);
-    useOnResize(contentRef, onContentResize);
     useOnResize(bodyContentRef, onBodyContentResize);
 
     useEffect(() => {
@@ -160,13 +177,13 @@ export default function ScrollableStyled({
         (event: React.DragEvent) => {
             const offsetTop = containerRef.current!.getBoundingClientRect().top;
             const offsetY = event.clientY - offsetTop;
-            if (offsetY + (overflowX ? 2 : 1) * lineHeight > innerHeight) {
+            if (offsetY + (overflow.x ? 2 : 1) * lineHeight > innerRect.height) {
                 setDragOver(lineHeight);
-            } else if (offsetY < (overflowX ? 2 : 1) * lineHeight) {
+            } else if (offsetY < (overflow.x ? 2 : 1) * lineHeight) {
                 setDragOver(-lineHeight);
             }
         },
-        [innerHeight, lineHeight, overflowX]
+        [innerRect, lineHeight, overflow]
     );
 
     useEffect(() => {
@@ -182,8 +199,8 @@ export default function ScrollableStyled({
 
     return (
         <div
-            className={`scrollable scrollable-styled ${overflowX ? 'overflow-x' : ''} ${
-                overflowY ? 'overflow-y' : ''
+            className={`scrollable scrollable-styled ${overflow.x ? 'overflow-x' : ''} ${
+                overflow.y ? 'overflow-y' : ''
             }`}
             id={scrollableId}
             ref={containerRef}
@@ -195,8 +212,8 @@ export default function ScrollableStyled({
                 onDragEnd={autoscroll ? cancelDragOver : undefined}
                 onDrop={autoscroll ? cancelDragOver : undefined}
                 style={{
-                    right: overflowY ? `${vScrollbarSize}px` : '0',
-                    bottom: overflowX ? `${hScrollbarSize}px` : '0',
+                    right: overflow.y ? `${scrollbarSize}px` : '0',
+                    bottom: overflow.x ? `${scrollbarSize}px` : '0',
                     transform: `translateX(-${scrollLeft}px)`,
                 }}
                 ref={contentRef}
@@ -209,7 +226,7 @@ export default function ScrollableStyled({
                 <div
                     className="scrollable-body"
                     style={{
-                        width: initialScrollWidth ? `${initialScrollWidth}px` : undefined,
+                        width: scrollWidth ? `${scrollWidth}px` : undefined,
                     }}
                 >
                     <div
@@ -217,6 +234,7 @@ export default function ScrollableStyled({
                         style={{
                             transform: `translateY(-${scrollTop}px)`,
                         }}
+                        data-scroll-top={scrollTop}
                         ref={bodyContentRef}
                     >
                         {body}
@@ -226,21 +244,20 @@ export default function ScrollableStyled({
             <Scrollbar
                 scrollableId={scrollableId}
                 orientation="horizontal"
-                clientSize={clientWidth}
-                scrollSize={scrollWidth}
+                clientSize={clientRect.width}
+                scrollSize={scrollRect.width}
                 scrollAmount={scrollAmountX}
                 onChange={setScrollLeft}
-                onResize={setHScrollbarSize}
                 ref={hScrollbarRef}
             />
             <Scrollbar
                 scrollableId={scrollableId}
                 orientation="vertical"
-                clientSize={clientHeight}
-                scrollSize={scrollHeight}
+                clientSize={clientRect.height}
+                scrollSize={scrollRect.height}
                 scrollAmount={scrollAmountY}
                 onChange={setScrollTop}
-                onResize={setVScrollbarSize}
+                onResize={setScrollbarSize}
                 ref={vScrollbarRef}
             />
         </div>

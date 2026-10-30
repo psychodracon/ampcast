@@ -15,6 +15,7 @@ import {NoMusicLibraryError} from 'services/errors';
 import {
     browser,
     canPlayMedia,
+    getLibraryIdFromPath,
     getMediaObjectId,
     groupBy,
     partition,
@@ -239,6 +240,17 @@ async function createPlayQueue(
     return playQueue;
 }
 
+async function getLibraryPrefs(libraryId: string): Promise<{musicAnalysis: boolean}> {
+    const {MediaContainer: prefs} = await fetchJSON<plex.LibraryPrefsResponse>({
+        path: `/library/sections/${libraryId}/prefs`,
+        params: {agent: 'tv.plex.agents.music'},
+    });
+    const musicAnalysis = prefs.Setting.some(
+        (setting) => setting.id === 'musicAnalysis' && setting.value === 'true'
+    );
+    return {musicAnalysis};
+}
+
 async function getPlayQueue(id: number): Promise<plex.PlayQueue> {
     const {MediaContainer: playQueue} = await fetchJSON<plex.PlayQueueResponse>({
         path: `/playQueues/${id}`,
@@ -341,7 +353,8 @@ async function getPlexFilters(
     itemType: ItemType,
     filterName: string
 ): Promise<readonly MediaFilter[]> {
-    const cacheKey = `${itemType}-${filterName}`;
+    const libraryId = getMusicLibraryId();
+    const cacheKey = `${libraryId}-${itemType}-${filterName}`;
     if (!cachedFilters[cacheKey]) {
         const type = getPlexMediaType(itemType);
         const {
@@ -371,7 +384,7 @@ export function getMusicLibraryPath(path = 'all'): string {
 }
 
 export function getMusicLibraryId(): string {
-    const libraryId = plexSettings.libraryId;
+    const libraryId = getLibraryIdFromPath() ?? plexSettings.libraryId;
     if (!libraryId) {
         throw new NoMusicLibraryError();
     }
@@ -434,15 +447,15 @@ async function search<T extends plex.RatingObject>(request: PlexRequest): Promis
                 )
                 .slice(0, 5);
             if (extraArtists.length > 0) {
-                const extraItems = await Promise.all([
-                    ...extraArtists.map((extraArtist) =>
+                const extraItems = await Promise.all(
+                    extraArtists.map((extraArtist) =>
                         plexApi.fetchJSON<plex.MetadataResponse<plex.Track>>({
                             ...request,
                             path: getMusicLibraryPath(),
                             params: {'artist.id': extraArtist.ratingKey, type: plexMediaType.Track},
                         })
-                    ),
-                ]);
+                    )
+                );
                 const tracks = extraItems
                     .map(({MediaContainer: {Metadata = []}}) => Metadata)
                     .flat() as T[];
@@ -723,6 +736,7 @@ const plexApi = {
     fetchJSON,
     getFilters,
     getHeaders,
+    getLibraryPrefs,
     getLyrics,
     getMetadata,
     getMusicLibraries,

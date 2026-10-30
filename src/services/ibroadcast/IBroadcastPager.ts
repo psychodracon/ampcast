@@ -33,7 +33,7 @@ export default class IBroadcastPager<T extends MediaObject> extends IndexedPager
                     total: this.ids.length,
                 };
             },
-            {pageSize: 1000, ...options},
+            {pageSize: 1000, autofill: true, autofillMaxPages: 999, ...options},
             createChildPager
         );
     }

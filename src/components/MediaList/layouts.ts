@@ -86,9 +86,8 @@ export const otherTracksLayout: MediaListLayout = {
     extraFields: allMediaItemFields,
 };
 
-export const radiosLayoutSmall: MediaListLayout = {
-    view: 'card minimal',
-    views: [],
+export const radiosLayout: MediaListLayout = {
+    view: 'card small',
     card: {h1: 'Name'},
     details: ['Name'],
     extraFields: [],
@@ -112,9 +111,10 @@ export const videosLayout: MediaListLayout = {
     card: {
         h1: 'Title',
         h2: 'Artist',
+        h3: 'AlbumAndYear',
         data: 'Duration',
     },
-    details: ['Title', 'Artist', 'Duration'],
+    details: ['Title', 'Artist', 'Album', 'Year', 'Duration'],
     extraFields: allMediaItemFields,
 };
 

@@ -6,6 +6,7 @@ import {
     songChartsLayout,
 } from 'components/MediaList/layouts';
 import {NoSpotifyChartsError} from 'services/errors';
+import {createSingularMediaSource} from 'services/mediaServices/mediaSources';
 import {setHiddenSources} from 'services/mediaServices/servicesSettings';
 import SimplePager from 'services/pagers/SimplePager';
 import {Except, SetRequired} from 'type-fest';
@@ -22,7 +23,8 @@ import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
 import MediaSource, {AnyMediaSource, MediaMultiSource, MediaSourceItems} from 'types/MediaSource';
 import Pager, {PagerConfig} from 'types/Pager';
-import {exists, partition} from 'utils';
+import Pin, {Pinnable} from 'types/Pin';
+import {exists, getItemTypeFromSrc, getMediaObjectId, partition} from 'utils';
 import SpotifyRecentlyPlayedBrowser from './components/SpotifyRecentlyPlayedBrowser';
 import spotifyApi, {SpotifyAlbum, SpotifyArtist, SpotifyPlaylist} from './spotifyApi';
 import SpotifyClientSortPager from './SpotifyClientSortPager';
@@ -56,51 +58,117 @@ export const spotifyPlaylistItems: MediaSourceItems<SetRequired<MediaItem, 'nano
 
 const spotifyLikedSongsSort: MediaListSort = {
     sortOptions: {
-        title: 'Title',
-        artist: 'Artist',
-        album: 'Album',
-        added_at: 'Date Favorited',
+        Title: 'Title',
+        Artist: 'Artist',
+        Album: 'Album',
+        dateAdded: 'Date Favorited',
     },
     defaultSort: {
-        sortBy: 'added_at',
+        sortBy: 'dateAdded',
         sortOrder: -1,
     },
 };
 
 const spotifyLikedAlbumsSort: MediaListSort = {
     sortOptions: {
-        title: 'Title',
-        artist: 'Artist',
-        year: 'Year',
-        added_at: 'Date Favorited',
+        Title: 'Title',
+        Artist: 'Artist',
+        Year: 'Year',
+        dateAdded: 'Date Favorited',
     },
     defaultSort: {
-        sortBy: 'added_at',
+        sortBy: 'dateAdded',
         sortOrder: -1,
     },
 };
 
 const spotifyLikedArtistsSort: MediaListSort = {
     sortOptions: {
-        name: 'Name',
-        added_at: 'Date Favorited',
+        Name: 'Name',
+        dateAdded: 'Date Favorited',
     },
     defaultSort: {
-        sortBy: 'name',
+        sortBy: 'Name',
         sortOrder: 1,
     },
 };
 
 const spotifyArtistAlbumsSort: MediaListSort = {
     sortOptions: {
-        title: 'Title',
-        year: 'Year',
+        Title: 'Title',
+        Year: 'Year',
     },
     defaultSort: {
-        sortBy: 'year',
+        sortBy: 'Year',
         sortOrder: 1,
     },
 };
+
+export function createSourceFromObject<T extends MediaObject>(src: string): MediaSource<T> {
+    const itemType = getItemTypeFromSrc(src);
+    switch (itemType) {
+        case ItemType.Playlist:
+            return createSingularMediaSource<MediaPlaylist>({
+                src,
+                itemType,
+                secondaryItems: spotifyPlaylistItems,
+            }) as MediaSource<T>;
+
+        default:
+            return createSingularMediaSource<T>({
+                src,
+                itemType,
+            });
+    }
+}
+
+export function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
+    if (pin.itemType !== ItemType.Playlist) {
+        throw Error('Unsupported Pin type.');
+    }
+    return {
+        title: pin.title,
+        itemType: pin.itemType,
+        id: pin.src,
+        sourceId: `${serviceId}/pinned-playlist`,
+        icon: 'pin',
+        isPin: true,
+        singular: true,
+        secondaryItems: spotifyPlaylistItems,
+
+        search(): Pager<T> {
+            return new SpotifyPager(async (): Promise<SpotifyPage> => {
+                const id = getMediaObjectId(pin);
+                const playlist = await spotifyApi.getPlaylist(id);
+                return {items: [{...playlist, isChart: pin.isChart}], total: 1};
+            });
+        },
+    } as MediaSource<T>;
+}
+
+export function createRelatedPlaylistsSource<T extends MediaObject>(
+    item: T
+): MediaSource<MediaPlaylist> | undefined {
+    switch (item.itemType) {
+        case ItemType.Artist: {
+            return {
+                id: `${item.src}/related-playlists`,
+                sourceId: `${serviceId}/playlists`,
+                title: 'Related Playlists',
+                icon: 'playlist',
+                itemType: ItemType.Playlist,
+                secondaryItems: spotifyPlaylistItems,
+
+                search(): Pager<MediaPlaylist> {
+                    return createSearchPager(ItemType.Playlist, item.title, {
+                        pageSize: spotifySettings.restrictedApi ? 20 : 10,
+                        maxSize: 20,
+                    });
+                },
+            };
+        }
+    }
+}
 
 export const spotifySearch: MediaMultiSource = {
     id: `${serviceId}/search`,
@@ -124,15 +192,11 @@ export const spotifySearch: MediaMultiSource = {
                 sort: spotifyArtistAlbumsSort,
             },
         }),
-        ...(spotifySettings.restrictedApi
-            ? []
-            : [
-                  createSearch<MediaPlaylist>(ItemType.Playlist, {
-                      id: 'playlists',
-                      title: 'Playlists',
-                      secondaryItems: spotifyPlaylistItems,
-                  }),
-              ]),
+        createSearch<MediaPlaylist>(ItemType.Playlist, {
+            id: 'playlists',
+            title: 'Playlists',
+            secondaryItems: spotifyPlaylistItems,
+        }),
     ],
 };
 
@@ -153,42 +217,12 @@ const spotifyRecentlyPlayed: MediaSource<MediaItem> = {
     },
 };
 
-// TODO: Spotify scope: 'user-top-read'.
-
-// const spotifyTopTracks: MediaSource<MediaItem> = {
-//     id: `${serviceId}/top-tracks`,
-//     title: 'Top Tracks',
-//     icon: 'star',
-//     itemType: ItemType.Media,
-//     primaryItems: spotifyMediaItems,
-//
-//     search(): Pager<MediaItem> {
-//         return new SpotifyPager(async (offset: number, limit: number): Promise<SpotifyPage> => {
-//             return spotifyApi.getMyTopTracks({offset, limit});
-//         });
-//     },
-// };
-//
-// const spotifyTopArtists: MediaSource<MediaArtist> = {
-//     id: `${serviceId}/top-artists`,
-//     title: 'Top Artists',
-//     icon: 'star',
-//     itemType: ItemType.Artist,
-//     defaultHidden: true,
-//
-//     search(): Pager<MediaArtist> {
-//         return new SpotifyPager(async (offset: number, limit: number): Promise<SpotifyPage> => {
-//             return spotifyApi.getMyTopArtists({offset, limit});
-//         });
-//     },
-// };
-
 const spotifyLikedSongs: MediaSource<MediaItem> = {
     id: `${serviceId}/liked-songs`,
     title: 'My Songs',
     icon: 'heart',
     itemType: ItemType.Media,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     primaryItems: {
         ...spotifyMediaItems,
         sort: spotifyLikedSongsSort,
@@ -209,10 +243,11 @@ const spotifyLikedSongs: MediaSource<MediaItem> = {
 
 const spotifyLikedAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/liked-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'My Albums',
     icon: 'heart',
     itemType: ItemType.Album,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     primaryItems: {
         sort: spotifyLikedAlbumsSort,
     },
@@ -232,10 +267,11 @@ const spotifyLikedAlbums: MediaSource<MediaAlbum> = {
 
 const spotifyFollowedArtists: MediaSource<MediaArtist> = {
     id: `${serviceId}/followed-artists`,
+    sourceId: `${serviceId}/artists`,
     title: 'My Artists',
     icon: 'heart',
     itemType: ItemType.Artist,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     primaryItems: {
         sort: spotifyLikedArtistsSort,
     },
@@ -264,7 +300,7 @@ const spotifyPlaylists: MediaSource<MediaPlaylist> = {
     title: 'My Playlists',
     icon: 'heart',
     itemType: ItemType.Playlist,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     secondaryItems: spotifyPlaylistItems,
 
     search(): Pager<MediaPlaylist> {
@@ -311,6 +347,7 @@ export const spotifyEditablePlaylists: MediaSource<MediaPlaylist> = {
 
 const spotifyFeaturedPlaylists: MediaSource<MediaPlaylist> = {
     id: `${serviceId}/featured-playlists`,
+    sourceId: `${serviceId}/playlists`,
     title: 'Popular Playlists',
     icon: 'playlist',
     itemType: ItemType.Playlist,
@@ -330,6 +367,7 @@ const spotifyFeaturedPlaylists: MediaSource<MediaPlaylist> = {
 
 const spotifyNewReleases: MediaSource<MediaAlbum> = {
     id: `${serviceId}/new-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'New Releases',
     icon: 'album',
     itemType: ItemType.Album,
@@ -358,6 +396,7 @@ const spotifyNewReleases: MediaSource<MediaAlbum> = {
 
 const spotifyPlaylistsByCategory: MediaSource<MediaPlaylist> = {
     id: `${serviceId}/playlists-by-category`,
+    sourceId: `${serviceId}/playlists`,
     title: 'Browse Playlists',
     icon: 'playlist',
     itemType: ItemType.Playlist,

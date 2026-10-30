@@ -9,18 +9,20 @@ import MediaFilter from 'types/MediaFilter';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
-import MediaSource from 'types/MediaSource';
 import MediaType from 'types/MediaType';
 import Pager from 'types/Pager';
 import PersonalMediaLibrary from 'types/PersonalMediaLibrary';
 import PersonalMediaService from 'types/PersonalMediaService';
-import Pin, {Pinnable} from 'types/Pin';
 import PlaybackType from 'types/PlaybackType';
 import ServiceType from 'types/ServiceType';
-import {getMediaObjectId} from 'utils';
+import {exists, getMediaObjectId, Logger} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
-import fetchFirstPage, {fetchFirstItem} from 'services/pagers/fetchFirstPage';
+import {createRadioStation} from 'services/mediaServices/mediaSources';
+import fetchFirstPage from 'services/pagers/fetchFirstPage';
+import {createLookupFromTitle, findMatches} from 'services/metadata';
+import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
 import SimplePager from 'services/pagers/SimplePager';
+import WrappedPager from 'services/pagers/WrappedPager';
 import {
     observeConnecting,
     observeConnectionLogging,
@@ -32,20 +34,23 @@ import {
     reconnect,
 } from './plexAuth';
 import plexApi from './plexApi';
-import plexMediaType from './plexMediaType';
 import PlexPager from './PlexPager';
 import PlexRadioPager from './PlexRadioPager';
 import {scrobble} from './plexScrobbler';
 import plexSettings from './plexSettings';
 import plexSources, {
     createSearchPager,
+    createSourceFromObject,
+    createSourceFromPin,
     plexEditablePlaylists,
-    plexPlaylistItems,
     plexSearch,
 } from './plexSources';
 import ServerSettings from './components/PlexServerSettings';
+import {createMediaObject, getMediaAlbums} from './plexUtils';
 
 const serviceId: MediaServiceId = 'plex';
+
+const logger = new Logger(serviceId);
 
 const plex: PersonalMediaService = {
     id: serviceId,
@@ -53,6 +58,7 @@ const plex: PersonalMediaService = {
     icon: serviceId,
     url: 'https://www.plex.tv',
     serviceType: ServiceType.PersonalMedia,
+    browsable: true,
     Components: {ServerSettings},
     get internetRequired() {
         return plexSettings.internetRequired;
@@ -89,6 +95,9 @@ const plex: PersonalMediaService = {
     compareForRating,
     createPlaylist,
     createRadioPager,
+    createRelatedItemsPager,
+    createSongsPager,
+    createSourceFromObject,
     createSourceFromPin,
     editPlaylist,
     getFilters,
@@ -160,41 +169,92 @@ async function createPlaylist<T extends MediaItem>(
 }
 
 function createRadioPager(item: MediaItem): Pager<MediaItem> {
-    const [, type] = item.src.split(':');
-    if (type !== 'radio' && type !== 'artist-radio') {
+    if (item.linearType !== LinearType.Station) {
         throw Error('Not supported');
     }
-    return new PlexRadioPager(item.src);
+    const [, type, ratingKey] = item.src.split(':');
+    return type === 'song-radio'
+        ? new SimpleMediaPager(async () => {
+              const item = await getMediaObject<MediaItem>(`plex:track:${ratingKey}`);
+              const pager = new PlexPager<MediaItem>({
+                  path: `/library/metadata/${ratingKey}/nearest`,
+                  params: {maxDistance: 0.5},
+              });
+              try {
+                  let items = await fetchFirstPage(pager);
+                  const duplicates = findMatches(items, item);
+                  items = items.filter((item) => !duplicates.includes(item));
+                  return [item, ...items];
+              } catch (err) {
+                  logger.info('createRadioPager');
+                  logger.error(err);
+                  return [item];
+              }
+          })
+        : new PlexRadioPager(item.src);
+}
+
+function createRelatedItemsPager<T extends MediaObject>(item: T): Pager<T> | undefined {
+    const ratingKey = getMediaObjectId(item);
+    switch (item.itemType) {
+        case ItemType.Album:
+            if (plexSettings.sonicAnalysis) {
+                return new PlexPager<T>({
+                    path: `/library/metadata/${ratingKey}/nearest`,
+                    params: {maxDistance: 0.5},
+                });
+            }
+            break;
+
+        case ItemType.Artist:
+            return new PlexPager<T>({
+                path: `/library/metadata/${ratingKey}/similar`,
+            });
+    }
+}
+
+function createSongsPager(item: MediaItem): Pager<MediaItem> {
+    const songsPager = new SimpleMediaPager(async () => [item]);
+    if (item.mediaType === MediaType.Video) {
+        return songsPager;
+    } else {
+        const radiosPager = new SimpleMediaPager(async () => {
+            const id = getMediaObjectId(item);
+            const radio = createRadioStation({
+                src: `${serviceId}:song-radio:${id}`,
+                title: `${item.title} - Radio`,
+                thumbnails: item.thumbnails,
+            });
+            return [radio];
+        });
+        const audiosPager = plexSettings.sonicAnalysis
+            ? new WrappedPager(undefined, songsPager, radiosPager)
+            : songsPager;
+        const artistLink = item.links?.artists?.[0];
+        if (artistLink) {
+            const videosPager = new SimpleMediaPager<MediaItem>(async () => {
+                const [, , artistId] = artistLink.split(':');
+                const artistVideosPager = new PlexPager<MediaItem>({
+                    path: `/library/metadata/${artistId}/extras`,
+                });
+                const artistVideos = await fetchFirstPage(artistVideosPager);
+                const lookupItemsMap = new Map<MediaItem | null, MediaItem>(
+                    artistVideos.map((video) => [createLookupFromTitle(video.title), video])
+                );
+                const lookupVideos = [...lookupItemsMap.keys()].filter(exists);
+                const matches = findMatches(lookupVideos, item);
+                return matches.map((lookup) => lookupItemsMap.get(lookup)!);
+            });
+            return new WrappedPager(undefined, audiosPager, videosPager);
+        } else {
+            return audiosPager;
+        }
+    }
 }
 
 async function editPlaylist(playlist: MediaPlaylist): Promise<MediaPlaylist> {
     await plexApi.editPlaylist(playlist);
     return playlist;
-}
-
-function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
-    if (pin.itemType !== ItemType.Playlist) {
-        throw Error('Unsupported Pin type.');
-    }
-    return {
-        title: pin.title,
-        itemType: pin.itemType,
-        id: pin.src,
-        sourceId: `${serviceId}/pinned-playlist`,
-        icon: 'pin',
-        isPin: true,
-        secondaryItems: plexPlaylistItems,
-
-        search(): Pager<T> {
-            return new PlexPager({
-                path: `/playlists/${getMediaObjectId(pin)}`,
-                params: {
-                    type: plexMediaType.Playlist,
-                    playlistType: 'audio',
-                },
-            });
-        },
-    } as MediaSource<T>;
 }
 
 async function getFilters(
@@ -232,12 +292,14 @@ async function addMetadata<T extends MediaObject>(item: T): Promise<T> {
 }
 
 async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
-    const [, , ratingKey] = src.split(':');
-    const pager = new PlexPager<T>(
-        {path: `/library/metadata/${ratingKey}`},
-        {pageSize: 1, maxSize: 1}
-    );
-    return fetchFirstItem<T>(pager, {timeout: 2000});
+    const [, type, ratingKey] = src.split(':');
+    const [object] = await plexApi.getMetadata([ratingKey]);
+    if (type === 'track') {
+        const [album] = await getMediaAlbums([object]);
+        return createMediaObject<MediaItem>(object, album) as T;
+    } else {
+        return createMediaObject<T>(object);
+    }
 }
 
 function getPlayableUrl(item: MediaItem): string {

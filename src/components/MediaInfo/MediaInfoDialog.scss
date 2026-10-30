@@ -4,4 +4,18 @@
     &:not(.empty) {
         width: 40em;
     }
+
+    .dialog-buttons {
+        display: flex;
+        text-align: left;
+
+        .button {
+            margin-left: auto;
+        }
+
+        .navigation-button {
+            margin-left: 0;
+            cursor: pointer;
+        }
+    }
 }

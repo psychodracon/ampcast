@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import MediaService from 'types/MediaService';
 import {Logger} from 'utils';
+import ampcastElectron from 'services/ampcastElectron';
 import {hasProxyLogin, isServerLocked} from 'services/mediaServices/buildConfig';
 import Dialog, {DialogProps} from 'components/Dialog';
 import DialogButtons from 'components/Dialog/DialogButtons';
@@ -15,6 +16,7 @@ export interface LoginDialogProps extends DialogProps {
         host: string;
         userName?: string;
         useManualLogin?: boolean;
+        savePassword?(password: string): Promise<void>;
     };
     login: (
         host: string,
@@ -22,21 +24,32 @@ export interface LoginDialogProps extends DialogProps {
         password: string,
         useProxy?: boolean
     ) => Promise<string>;
+    password?: string;
+    onBeforeLogin?: () => void;
 }
 
-export default function LoginDialog({service, settings, login, ...props}: LoginDialogProps) {
-    const id = service.id;
+export default function LoginDialog({
+    service,
+    settings,
+    login,
+    password,
+    onBeforeLogin,
+    ...props
+}: LoginDialogProps) {
+    const serviceId = service.id;
     const [connecting, setConnecting] = useState(false);
     const [message, setMessage] = useState('');
     const dialogRef = useRef<HTMLDialogElement>(null);
     const hostRef = useRef<HTMLInputElement>(null);
     const userNameRef = useRef<HTMLInputElement>(null);
     const passwordRef = useRef<HTMLInputElement>(null);
+    const savePasswordRef = useRef<HTMLInputElement>(null);
     const useProxyRef = useRef<HTMLInputElement>(null);
-    const canUseProxy = hasProxyLogin(service.id);
-    const [useProxy, setUseProxy] = useState(() => canUseProxy && !settings.useManualLogin);
+    const canUseProxy = hasProxyLogin(serviceId);
+    const locked = isServerLocked(serviceId);
+    const useManualLogin = settings.useManualLogin && !locked;
+    const [useProxy, setUseProxy] = useState(() => canUseProxy && !useManualLogin);
     const initialUseProxy = useFirstValue(useProxy);
-    const readOnly = isServerLocked(service.id);
 
     const submit = useCallback(async () => {
         try {
@@ -46,13 +59,17 @@ export default function LoginDialog({service, settings, login, ...props}: LoginD
 
             // Save for auto-completion.
             settings.host = host;
-            if ('userName' in settings) {
-                settings.userName = userName;
-            }
             if ('useManualLogin' in settings) {
                 settings.useManualLogin = !useProxy;
             }
+            if ('userName' in settings) {
+                settings.userName = userName;
+            }
+            if (ampcastElectron && settings.savePassword) {
+                await settings.savePassword(savePasswordRef.current?.checked ? password : '');
+            }
 
+            onBeforeLogin?.();
             setConnecting(true);
             setMessage('Connecting...');
 
@@ -72,7 +89,7 @@ export default function LoginDialog({service, settings, login, ...props}: LoginD
                 );
             }
         }
-    }, [settings, login, useProxy]);
+    }, [settings, onBeforeLogin, login, useProxy]);
 
     const handleSubmit = useCallback(
         (event: React.SubmitEvent) => {
@@ -103,82 +120,96 @@ export default function LoginDialog({service, settings, login, ...props}: LoginD
     return (
         <Dialog
             {...props}
-            className={`login-dialog login-dialog-${id}`}
+            className={`login-dialog login-dialog-${serviceId}`}
             icon={service.icon}
             title={`Connect to ${service.name}`}
             ref={dialogRef}
         >
-            <form id={`${id}-login`} method="dialog" onSubmit={handleSubmit}>
+            <form id={`${serviceId}-login`} method="dialog" onSubmit={handleSubmit}>
                 {canUseProxy ? (
                     <>
                         <p>
                             <input
                                 type="radio"
-                                name={`${id}-login-type`}
-                                id={`${id}-login-proxy`}
-                                defaultChecked={!settings.useManualLogin}
+                                name={`${serviceId}-login-type`}
+                                id={`${serviceId}-login-proxy`}
+                                defaultChecked={!useManualLogin}
                                 onChange={handleLoginTypeChange}
                                 ref={useProxyRef}
                             />
-                            <label htmlFor={`${id}-login-proxy`}>Default login</label>
+                            <label htmlFor={`${serviceId}-login-proxy`}>Default login</label>
                         </p>
                         <p>
                             <input
                                 type="radio"
-                                name={`${id}-login-type`}
-                                id={`${id}-login-manual`}
-                                defaultChecked={settings.useManualLogin}
-                                disabled={readOnly}
+                                name={`${serviceId}-login-type`}
+                                id={`${serviceId}-login-manual`}
+                                defaultChecked={useManualLogin}
+                                disabled={locked}
                                 onChange={handleLoginTypeChange}
                             />
-                            <label htmlFor={`${id}-login-manual`}>Advanced login:</label>
+                            <label htmlFor={`${serviceId}-login-manual`}>Advanced login:</label>
                         </p>
                     </>
                 ) : null}
                 <div className="table-layout">
                     <p>
-                        <label htmlFor={`${id}-host`}>Host:</label>
+                        <label htmlFor={`${serviceId}-host`}>Host:</label>
                         <input
                             type="url"
-                            id={`${id}-host`}
-                            name={`${id}-host`}
+                            id={`${serviceId}-host`}
+                            name={`${serviceId}-host`}
                             defaultValue={settings.host}
                             disabled={useProxy}
                             placeholder="http://"
-                            autoComplete={useProxy ? 'off' : `section-${id} url`}
-                            readOnly={readOnly}
+                            autoComplete={useProxy ? 'off' : `section-${serviceId} url`}
+                            readOnly={locked}
                             required
                             ref={hostRef}
                         />
                     </p>
                     <p>
-                        <label htmlFor={`${id}-username`}>User:</label>
+                        <label htmlFor={`${serviceId}-username`}>User:</label>
                         <input
                             type="text"
-                            id={`${id}-username`}
-                            name={`${id}-username`}
+                            id={`${serviceId}-username`}
+                            name={`${serviceId}-username`}
                             defaultValue={initialUseProxy ? '' : settings.userName}
                             disabled={useProxy}
                             spellCheck={false}
-                            autoComplete={useProxy ? 'off' : `section-${id} username`}
+                            autoComplete={useProxy ? 'off' : `section-${serviceId} username`}
                             autoCapitalize="off"
                             required
                             ref={userNameRef}
                         />
                     </p>
                     <p>
-                        <label htmlFor={`${id}-password`}>Password:</label>
+                        <label htmlFor={`${serviceId}-password`}>Password:</label>
                         <input
                             type="password"
-                            id={`${id}-password`}
-                            name={`${id}-password`}
+                            id={`${serviceId}-password`}
+                            name={`${serviceId}-password`}
+                            defaultValue={password}
                             disabled={useProxy}
                             ref={passwordRef}
-                            autoComplete={useProxy ? 'off' : `section-${id} current-password`}
+                            autoComplete={
+                                useProxy ? 'off' : `section-${serviceId} current-password`
+                            }
                             required
                         />
                     </p>
                 </div>
+                {ampcastElectron && settings.savePassword ? (
+                    <p className="save-password">
+                        <label htmlFor={`${serviceId}-save-password`}>save password</label>
+                        <input
+                            id={`${serviceId}-save-password`}
+                            type="checkbox"
+                            defaultChecked={!!password}
+                            ref={savePasswordRef}
+                        />
+                    </p>
+                ) : null}
                 <p className={`message ${connecting ? '' : 'error'}`}>{message}</p>
                 <DialogButtons submitText="Connect" />
             </form>

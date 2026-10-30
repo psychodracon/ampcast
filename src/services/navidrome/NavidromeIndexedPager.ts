@@ -12,8 +12,7 @@ import {getSourceSorting} from 'services/mediaServices/servicesSettings';
 import {dispatchMetadataChanges, observePlaylistAdditions} from 'services/metadata';
 import {CreateChildPager} from 'services/pagers/MediaPager';
 import IndexedPager from 'services/pagers/IndexedPager';
-import navidromeApi from './navidromeApi';
-import navidromeSettings from './navidromeSettings';
+import navidromeApi, {getMusicLibraryId} from './navidromeApi';
 import {navidromePlaylistItemsSort, navidromeSongsSortMap} from './navidromeSorting';
 import {createMediaObject} from './navidromeUtils';
 
@@ -33,16 +32,16 @@ export default class NavidromeIndexedPager<T extends MediaObject> extends Indexe
                     ...params,
                     _start,
                     _end,
-                    library_id: navidromeSettings.libraryId,
+                    library_id: getMusicLibraryId(),
                 });
                 if (
                     path === 'song' &&
-                    params?.title &&
+                    params?.title && // Song search.
                     !this.passive &&
                     pageNumber === 1 &&
                     items.length < pageSize
                 ) {
-                    // Fetch enhanced results if we have fewer items than the page size.
+                    // Fetch enhanced search results if we have fewer items than the page size.
                     items = this.refineTracksSearchResults(
                         params.title as string,
                         items as Navidrome.Song[]
@@ -166,7 +165,7 @@ export class NavidromePlaylistItemsPager extends NavidromeIndexedPager<MediaItem
             );
             this.subscribeTo(
                 this.observeComplete().pipe(
-                    switchMap(() => observePlaylistAdditions(this.playlist)),
+                    switchMap(() => observePlaylistAdditions(this.playlist.src)),
                     tap((items) => this._addItems(items))
                 ),
                 logger

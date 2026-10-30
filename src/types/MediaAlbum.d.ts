@@ -9,7 +9,7 @@ export default interface MediaAlbum extends BaseMediaObject {
     readonly pager: Pager<MediaItem>;
     // Everything below here should be optional.
     readonly albumType?: AlbumType;
-    readonly artist?: string;
+    readonly artists?: readonly string[];
     readonly multiDisc?: boolean;
     readonly year?: number;
     readonly trackCount?: number;
@@ -24,6 +24,9 @@ export default interface MediaAlbum extends BaseMediaObject {
     readonly explicit?: boolean;
     readonly badge?: string;
     readonly shareLink?: string;
+    readonly links?: BaseMediaObject['links'] & {
+        readonly artists?: readonly string[];
+    };
     readonly subsonic?: {
         readonly isDir?: boolean;
     };

@@ -19,6 +19,7 @@ import MediaSourceLabel from 'components/MediaSources/MediaSourceLabel';
 import TextBox from 'components/TextBox';
 import Time from 'components/Time';
 import ScrobblingOptions from './ScrobblingOptions';
+import useActiveItem from './useActiveItem';
 import './MediaInfo.scss';
 
 export interface MediaInfoProps<T extends MediaObject> {
@@ -30,21 +31,23 @@ export default function MediaInfo<T extends MediaObject>({
     item,
     scrobblingOptions,
 }: MediaInfoProps<T>) {
+    const activeItem = useActiveItem(item, true) as any; // TODO: Why?
+
     switch (item.itemType) {
         case ItemType.Media:
-            return <MediaItemInfo item={item} scrobblingOptions={scrobblingOptions} />;
+            return <MediaItemInfo item={activeItem} scrobblingOptions={scrobblingOptions} />;
 
         case ItemType.Artist:
-            return <ArtistInfo item={item} />;
+            return <ArtistInfo item={activeItem} />;
 
         case ItemType.Album:
-            return <AlbumInfo item={item} />;
+            return <AlbumInfo item={activeItem} />;
 
         case ItemType.Playlist:
-            return <PlaylistInfo item={item} />;
+            return <PlaylistInfo item={activeItem} />;
 
         case ItemType.Folder:
-            return <FolderInfo item={item} />;
+            return <FolderInfo item={activeItem} />;
     }
 }
 
@@ -90,7 +93,7 @@ function AlbumInfo({item: album}: MediaInfoProps<MediaAlbum>) {
             <div className="media-info-main">
                 <Thumbnail item={album} extendedSearch />
                 <Title title={album.title} />
-                <Artist artist={album.artist} />
+                <Artist artist={album.artists?.join(', ')} />
                 <Year year={album.year} />
                 <Genre genres={album.genres} />
                 <div className="media-info-icon-bar">
@@ -111,7 +114,7 @@ function ArtistInfo({item: artist}: MediaInfoProps<MediaArtist>) {
                 <Thumbnail item={artist} />
                 <Title title={artist.title} />
                 <Genre genres={artist.genres} />
-                <Country country={artist.country} />
+                <Country country={artist.origin} />
                 <div className="media-info-icon-bar">
                     <Badges item={artist} />
                     <Actions item={artist} />
@@ -158,13 +161,35 @@ function Title<T extends MediaObject>({title}: Pick<T, 'title'>) {
 }
 
 function Description<T extends MediaPlaylist>({description}: Pick<T, 'description'>) {
-    return description ? (
-        <TextBox className="description">
-            {description.split(/\n+/).map((text, index) => (
-                <p key={index}>{text}</p>
-            ))}
-        </TextBox>
-    ) : null;
+    if (description) {
+        let providerId = '';
+        description = description.replace(/\n\ncredit:(\w+)$/, (_, credit) => {
+            providerId = credit;
+            return '';
+        });
+        const provider = getService(providerId);
+        return (
+            <TextBox className="description">
+                {description.split(/\n\n+/).map((text, index) => (
+                    <p className={text.includes('\n') ? 'free-text' : ''} key={index}>
+                        {text
+                            .split('\n')
+                            .map((line) => <>{line}</>)
+                            // This is basically `Array.join(',')` in React.
+                            .reduce(
+                                (list: React.JSX.Element | null, item: React.JSX.Element | null) =>
+                                    // prettier-ignore
+                                    list ? (<>{list}<br />{item}</>) : item,
+                                null
+                            )}
+                    </p>
+                ))}
+                {provider ? <p className="credit">{`provided by ${provider.name}`}</p> : null}
+            </TextBox>
+        );
+    } else {
+        return null;
+    }
 }
 
 function Duration<T extends MediaItem>({duration}: Pick<T, 'duration'>) {
@@ -183,7 +208,7 @@ function TrackCount<T extends MediaAlbum | MediaPlaylist>({trackCount}: Pick<T, 
     return isNaN(value) ? null : <p className="track-count">{value.toLocaleString()}</p>;
 }
 
-function Artist<T extends MediaAlbum>({artist}: Pick<T, 'artist'>) {
+function Artist({artist}: {artist?: string}) {
     return artist ? (
         <h4 className="artist">
             <span className="text-label">By:</span> {artist}
@@ -341,9 +366,9 @@ function Genre<T extends MediaItem>({genres}: Pick<T, 'genres'>) {
     }
 }
 
-function Country<T extends MediaArtist>({country}: Pick<T, 'country'>) {
+function Country({country}: {country?: string}) {
     if (country) {
-        return <p className="country">Country: {country}</p>;
+        return <p className="country">From: {country}</p>;
     } else {
         return null;
     }
@@ -358,7 +383,7 @@ export function Thumbnail({className = '', ...props}: CoverArtProps) {
 }
 
 function Actions({item}: ActionsProps) {
-    return <DefaultActions item={item} inInfoView />;
+    return <DefaultActions item={item} location="info" />;
 }
 
 function isPlaylistItem(item: MediaItem): item is PlaylistItem {

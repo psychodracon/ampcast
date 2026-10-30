@@ -3,25 +3,29 @@ import {interval} from 'rxjs';
 import {Except} from 'type-fest';
 import Action from 'types/Action';
 import ItemType from 'types/ItemType';
+import MediaAlbum from 'types/MediaAlbum';
 import MediaListLayout, {Field} from 'types/MediaListLayout';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
-import MediaSource, {MediaSourceItems} from 'types/MediaSource';
+import MediaSource from 'types/MediaSource';
 import Pager from 'types/Pager';
 import ParentOf from 'types/ParentOf';
 import SortParams from 'types/SortParams';
 import {setSourceFields} from 'services/mediaServices/servicesSettings';
-import {ActionsProps, performAction, showActionsMenu} from 'components/Actions';
+import {getMediaListId, getMediaSourceItems} from 'services/mediaServices/mediaSources';
+import {performAction, showActionsMenu} from 'components/Actions';
 import ErrorBox, {ErrorBoxProps} from 'components/Errors/ErrorBox';
 import ListView, {Column, ListViewProps} from 'components/ListView';
+import useIsBrowserActive from 'components/MediaBrowser/useIsBrowserActive';
 import useFirstValue from 'hooks/useFirstValue';
 import usePager from 'hooks/usePager';
 import usePlaybackState from 'hooks/usePlaybackState';
 import usePreferences from 'hooks/usePreferences';
 import MediaListStatusBar from './MediaListStatusBar';
 import useMediaListLayout from './useMediaListLayout';
-import useOnDragStart from './useOnDragStart';
+import useActionsStore from './useActionsStore';
 import useMediaListSort from './useMediaListSort';
+import useOnDragStart from './useOnDragStart';
 import useViewClassName from './useViewClassName';
 import './MediaList.scss';
 
@@ -55,7 +59,6 @@ export interface MediaListProps<T extends MediaObject> extends Except<
     onError?: (error: unknown) => void;
     onLoad?: () => void;
     onInternalSort?: (params: SortParams) => void;
-    Actions?: React.FC<ActionsProps>;
     Error?: React.FC<ErrorBoxProps>;
 }
 
@@ -73,6 +76,7 @@ export default function MediaList<T extends MediaObject>({
     statusBarIcons,
     loadingText,
     emptyMessage,
+    disabled,
     onContextMenu,
     onDoubleClick,
     onEnter,
@@ -80,21 +84,32 @@ export default function MediaList<T extends MediaObject>({
     onInternalSort,
     onLoad,
     onSelect,
-    Actions,
     Error = ErrorBox,
     ...props
 }: MediaListProps<T>) {
     const uniqueId = useId();
-    const [, forceUpdate] = useReducer((i) => i + 1, 0);
-    const id = source ? `${source.sourceId || source.id}/${level}` : uniqueId;
+    const active = useIsBrowserActive();
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const sourceItems = getSourceItems(source, level); // view config
+    const syntheticAlbum = isSyntheticAlbum(parent) ? parent : undefined;
+    const singular = level === 1 && source?.singular;
+    const listId = source ? getMediaListId(source, level, syntheticAlbum) : uniqueId;
+    const [, forceUpdate] = useReducer((i) => i + 1, 0);
+    const sourceItems = getMediaSourceItems(source, level, syntheticAlbum); // view config
     const {itemKey = 'src', layout: layoutOptions} = sourceItems;
     const parentPlaylist = isPlaylist(parent) ? parent : undefined;
-    const layout = useMediaListLayout(id, defaultLayout, layoutOptions, Actions, parentPlaylist);
+    const layout = useMediaListLayout(
+        source,
+        level,
+        listId,
+        defaultLayout,
+        layoutOptions,
+        parentPlaylist
+    );
     const [scrollIndex, setScrollIndex] = useState(0);
     const [pageSize, setPageSize] = useState(0);
     const [{items, loaded, busy, complete, error, size, maxSize}, fetchAt] = usePager(pager);
+    const actionsReady = useActionsStore(level === 1 ? source : undefined, complete);
+    const canFetch = active && actionsReady;
     const empty = items.length === 0;
     const initialError = useFirstValue(empty ? error : null);
     const success = loaded && !initialError;
@@ -116,7 +131,7 @@ export default function MediaList<T extends MediaObject>({
         [complete, sourceItems, layout, isSearchResult]
     );
     const {sortedItems, sortParams, savedSortParams, onSort} = useMediaListSort(
-        id,
+        listId,
         items,
         isSearchResult,
         sourceItems,
@@ -131,9 +146,14 @@ export default function MediaList<T extends MediaObject>({
     }, []);
 
     useEffect(() => {
-        pager?.activate?.();
-        return () => pager?.deactivate?.();
-    }, [pager]);
+        // Turns autofill on/off.
+        if (active) {
+            pager?.activate?.();
+            return () => pager?.deactivate?.();
+        } else {
+            pager?.deactivate?.();
+        }
+    }, [pager, active]);
 
     useEffect(() => {
         if (success && onLoad) {
@@ -148,11 +168,11 @@ export default function MediaList<T extends MediaObject>({
     }, [initialError, onError]);
 
     useEffect(() => {
-        if (scrollIndex >= 0 && pageSize > 0) {
+        if (canFetch && scrollIndex >= 0 && pageSize > 0) {
             fetchAt(scrollIndex, pageSize);
         }
         // Re-fetch if the pager changes.
-    }, [fetchAt, scrollIndex, pageSize, pager]);
+    }, [fetchAt, canFetch, scrollIndex, pageSize, pager]);
 
     const isPlayable = useCallback(
         (item: MediaObject): boolean => {
@@ -178,14 +198,15 @@ export default function MediaList<T extends MediaObject>({
             if (items.length === 0) {
                 return;
             }
-            const action = await showActionsMenu(
+            const action = await showActionsMenu({
                 items,
-                containerRef.current!,
+                target: containerRef.current!,
                 x,
                 y,
-                button === -1 ? 'right' : 'left',
-                {inListView: true, parentPlaylist, source}
-            );
+                align: button === -1 ? 'right' : 'left',
+                inListView: true,
+                parentPlaylist,
+            });
             if (action) {
                 if (action === Action.DeletePlaylistItems) {
                     performAction(action, items, parentPlaylist);
@@ -194,7 +215,7 @@ export default function MediaList<T extends MediaObject>({
                 }
             }
         },
-        [parentPlaylist, source]
+        [parentPlaylist]
     );
 
     const handleDoubleClick = useCallback(
@@ -241,10 +262,13 @@ export default function MediaList<T extends MediaObject>({
                 } else {
                     newFields.push(col.id);
                 }
-                setSourceFields(id, newFields.filter((field) => field !== 'Actions') as Field[]);
+                setSourceFields(
+                    listId,
+                    newFields.filter((field) => field !== 'Actions') as Field[]
+                );
             }
         },
-        [id, layout]
+        [listId, layout]
     );
 
     const itemClassName = useCallback(
@@ -252,9 +276,10 @@ export default function MediaList<T extends MediaObject>({
             if (item?.itemType === ItemType.Media) {
                 const [serviceId] = item.src.split(':');
                 const playing =
-                    item.src === playingSrc ||
-                    (playingCatalogId && item.apple?.catalogId === playingCatalogId) ||
-                    item.playedAt === -1
+                    !singular &&
+                    (item.src === playingSrc ||
+                        (playingCatalogId && item.apple?.catalogId === playingCatalogId) ||
+                        item.playedAt === -1)
                         ? 'playing'
                         : '';
                 const unplayable =
@@ -266,19 +291,21 @@ export default function MediaList<T extends MediaObject>({
                 return '';
             }
         },
-        [playingSrc, playingCatalogId, disableExplicitContent]
+        [singular, playingSrc, playingCatalogId, disableExplicitContent]
     );
 
     return (
         <div
-            className={`panel ${className} ${viewClassName}`}
-            id={id}
+            className={`panel ${className} ${viewClassName} ${level === 3 ? 'tertiary' : level === 2 ? 'secondary' : 'primary'}-items`}
+            data-list-id={listId}
             data-view={layout.view}
+            data-sort-by={savedSortParams?.sortBy}
+            data-sort-order={savedSortParams?.sortOrder}
             onDragStart={onDragStart}
             ref={containerRef}
         >
             {empty && error ? (
-                <Error error={error} reportedBy="MediaList" reportingId={id} />
+                <Error error={error} reportedBy="MediaList" reportingId={listId} />
             ) : (
                 <ListView
                     {...props}
@@ -290,12 +317,14 @@ export default function MediaList<T extends MediaObject>({
                     emptyMessage={
                         loaded && empty ? emptyMessage || sourceItems?.emptyMessage : undefined
                     }
-                    draggable={draggable}
+                    disabled={singular ? true : disabled}
+                    hidden={!active}
+                    draggable={singular ? false : draggable}
                     reorderable={reorderable}
                     sortable={sortable}
                     sortParams={sortParams}
                     savedSortParams={savedSortParams}
-                    storageId={id}
+                    storageId={listId}
                     onContextMenu={onContextMenu || handleContextMenu}
                     onDoubleClick={handleDoubleClick}
                     onEnter={handleEnter}
@@ -307,15 +336,15 @@ export default function MediaList<T extends MediaObject>({
                     onSelect={handleSelect}
                 />
             )}
-            {statusBar ? (
+            {active && statusBar && !singular ? (
                 <MediaListStatusBar
                     items={items}
                     error={error}
                     size={size}
                     maxSize={maxSize}
-                    loading={!!pager && !loaded}
-                    loadingText={loadingText}
-                    busy={busy}
+                    loading={!!pager && (!loaded || !actionsReady)}
+                    loadingText={actionsReady ? loadingText : 'Synching'}
+                    busy={busy || !actionsReady}
                     selectedCount={selectedItems.length}
                     icons={statusBarIcons}
                 />
@@ -324,19 +353,10 @@ export default function MediaList<T extends MediaObject>({
     );
 }
 
-function getSourceItems<T extends MediaObject>(
-    source?: MediaSource<any>,
-    level?: 1 | 2 | 3
-): MediaSourceItems<T> {
-    const sourceItems =
-        level === 3
-            ? source?.tertiaryItems
-            : level === 2
-              ? source?.secondaryItems
-              : source?.primaryItems;
-    return sourceItems || {};
-}
-
 function isPlaylist(item?: MediaObject): item is MediaPlaylist {
     return item?.itemType === ItemType.Playlist;
+}
+
+function isSyntheticAlbum(item?: MediaObject): item is MediaAlbum {
+    return !!item?.synthetic && item.itemType === ItemType.Album;
 }

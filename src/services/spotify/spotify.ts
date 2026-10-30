@@ -8,9 +8,6 @@ import MediaFilter from 'types/MediaFilter';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
-import MediaSource from 'types/MediaSource';
-import Pager from 'types/Pager';
-import Pin, {Pinnable} from 'types/Pin';
 import PlaybackType from 'types/PlaybackType';
 import PublicMediaService from 'types/PublicMediaService';
 import ServiceType from 'types/ServiceType';
@@ -18,7 +15,7 @@ import {chunk, getMediaObjectId} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
 import {dispatchMetadataChanges} from 'services/metadata';
 import fetchAllTracks from 'services/pagers/fetchAllTracks';
-import fetchFirstPage, {fetchFirstItem} from 'services/pagers/fetchFirstPage';
+import fetchFirstPage from 'services/pagers/fetchFirstPage';
 import SimplePager from 'services/pagers/SimplePager';
 import {
     observeConnecting,
@@ -30,16 +27,17 @@ import {
     logout,
     reconnect,
 } from './spotifyAuth';
-import spotifyApi from './spotifyApi';
-import SpotifyPager, {SpotifyPage} from './SpotifyPager';
+import spotifyApi, {SpotifyItem} from './spotifyApi';
 import spotifySettings from './spotifySettings';
 import spotifySources, {
+    createRelatedPlaylistsSource,
     createSearchPager,
+    createSourceFromObject,
+    createSourceFromPin,
     spotifyEditablePlaylists,
-    spotifyPlaylistItems,
     spotifySearch,
 } from './spotifySources';
-import {createMediaItemFromTrack} from './spotifyUtils';
+import {createMediaItemFromTrack, createMediaObject} from './spotifyUtils';
 import Credentials from './components/SpotifyCredentials';
 import Login from './components/SpotifyLogin';
 import './bootstrap';
@@ -53,6 +51,7 @@ const spotify: PublicMediaService = {
     url: 'https://www.spotify.com',
     credentialsUrl: 'https://developer.spotify.com/dashboard',
     serviceType: ServiceType.PublicMedia,
+    browsable: true,
     Components: {Credentials, Login},
     lyricsDisabled: true,
     internetRequired: true,
@@ -79,6 +78,8 @@ const spotify: PublicMediaService = {
     canStore,
     compareForRating,
     createPlaylist,
+    createRelatedPlaylistsSource,
+    createSourceFromObject,
     createSourceFromPin,
     editPlaylist,
     getDroppedItems,
@@ -179,30 +180,6 @@ async function removePlaylistItems(
     }
 }
 
-function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
-    if (pin.itemType !== ItemType.Playlist) {
-        throw Error('Unsupported Pin type.');
-    }
-    return {
-        title: pin.title,
-        itemType: pin.itemType,
-        id: pin.src,
-        sourceId: `${serviceId}/pinned-playlist`,
-        icon: 'pin',
-        isPin: true,
-        secondaryItems: spotifyPlaylistItems,
-
-        search(): Pager<T> {
-            const id = getMediaObjectId(pin);
-            const fields = 'id,type,external_urls,name,description,images,owner,uri,tracks.total';
-            return new SpotifyPager(async (): Promise<SpotifyPage> => {
-                const playlist = await spotifyApi.getPlaylist(id, fields);
-                return {items: [{...playlist, isChart: pin.isChart}], total: 1};
-            });
-        },
-    } as MediaSource<T>;
-}
-
 async function getFilters(filterType: FilterType): Promise<readonly MediaFilter[]> {
     if (filterType === FilterType.ByGenre) {
         return getCategories();
@@ -299,31 +276,12 @@ async function addUserData<T extends MediaObject>(items: readonly T[]): Promise<
 }
 
 async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
-    const pager = new SpotifyPager<T>(async (): Promise<SpotifyPage> => {
-        const fetchItem = () => {
-            src = getSrcFromUrl(src);
-            const [, type, id] = src.split(':');
-            switch (type) {
-                case 'album':
-                    return spotifyApi.getAlbum(id);
-
-                case 'artist':
-                    return spotifyApi.getArtist(id);
-
-                case 'playlist':
-                    return spotifyApi.getPlaylist(id);
-
-                case 'track':
-                    return spotifyApi.getTrack(id);
-
-                default:
-                    throw Error(`Unsupported type: '${type}'`);
-            }
-        };
-        const item = await fetchItem();
-        return {items: [item], total: 1, atEnd: true};
-    });
-    return fetchFirstItem<T>(pager, {timeout: 2000});
+    const [, type, id] = src.split(':');
+    const [object, [inLibrary]] = await Promise.all([
+        spotifyApi.get<SpotifyItem>(`/${type}s/${id}`),
+        spotifyApi.getLibraryContains([src]),
+    ]);
+    return createMediaObject(object, inLibrary);
 }
 
 async function getPlaybackType(): Promise<PlaybackType> {

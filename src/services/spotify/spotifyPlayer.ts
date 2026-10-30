@@ -9,7 +9,6 @@ import {
     distinctUntilChanged,
     filter,
     firstValueFrom,
-    fromEvent,
     interval,
     map,
     merge,
@@ -207,9 +206,6 @@ export class SpotifyPlayer implements Player<MediaItem> {
                 tap(() => this.error$.next(Error('Not logged in')))
             )
             .subscribe(logger);
-
-        // Remove event listeners on page unload.
-        fromEvent(window, 'pagehide').subscribe(() => this.disconnect());
 
         // Log errors.
         this.observeError().subscribe(logger.error);
@@ -591,11 +587,8 @@ export class SpotifyPlayer implements Player<MediaItem> {
 
     private async createPlayer(): Promise<void> {
         if (this.player) {
-            if (this.loadError) {
-                if (!this.token) {
-                    throw Error('No access token');
-                }
-                await this.reconnect();
+            if (!this.token) {
+                throw Error('No access token');
             }
         } else {
             const loaded = await this.waitForPlayer();
@@ -632,7 +625,7 @@ export class SpotifyPlayer implements Player<MediaItem> {
         logger.log('reconnect');
         await this.safePause();
         this.disconnect();
-        await sleep(1000);
+        await sleep(3000);
         const player = await this.connect();
         await sleep(3000);
         return player;

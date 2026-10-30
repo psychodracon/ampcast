@@ -56,7 +56,6 @@ function Scrollbar({
     const trackRef = useRef<HTMLDivElement>(null);
     const thumbRef = useRef<HTMLDivElement>(null);
     const {position, max, clientSize, scrollSize, resize, scrollBy, scrollTo} = useScrollbarState();
-    const [size, setSize] = useState(0);
     const [trackSize, setTrackSize] = useState(0);
     const [thumbSize, setThumbSize] = useState(0);
     const [dragStart, setDragStart] = useState(-1);
@@ -72,12 +71,20 @@ function Scrollbar({
     const atEnd = useMemo(() => () => isAtEnd, [isAtEnd]);
     const atStart = useMemo(() => () => isAtStart, [isAtStart]);
 
-    useImperativeHandle(ref, () => ({scrollBy, scrollTo, atEnd, atStart}));
-
-    useEffect(
-        () => resize(props.clientSize, props.scrollSize),
-        [props.clientSize, props.scrollSize, resize]
+    useImperativeHandle(
+        ref,
+        () => ({
+            scrollBy,
+            scrollTo,
+            atEnd,
+            atStart,
+        }),
+        [scrollBy, scrollTo, atEnd, atStart]
     );
+
+    useEffect(() => {
+        resize(props.clientSize, props.scrollSize);
+    }, [props.clientSize, props.scrollSize, resize]);
 
     useLayoutEffect(() => {
         // Perform single-line scrolls a bit faster.
@@ -93,13 +100,13 @@ function Scrollbar({
         }
     }, [position, onChange, smallChange]);
 
-    useEffect(() => onResize?.(size), [size, onResize]);
-
     useOnResize(
         trackRef,
         ({width, height}) => {
-            setTrackSize(vertical ? height : width);
-            setSize(vertical ? width : height);
+            if (width * height > 0) {
+                setTrackSize(vertical ? height : width);
+                onResize?.(vertical ? width : height);
+            }
         },
         'border-box'
     );
@@ -220,7 +227,7 @@ function Scrollbar({
             role="scrollbar"
             aria-controls={scrollableId}
             aria-orientation={orientation}
-            aria-valuenow={Number(((position * 100) / max).toFixed(1))}
+            aria-valuenow={Number(((position * 100) / max).toFixed(1)) || 0}
             aria-valuemin={0}
             aria-valuemax={100}
             onContextMenu={cancelEvent}

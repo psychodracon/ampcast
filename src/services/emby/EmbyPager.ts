@@ -15,7 +15,7 @@ import {CreateChildPager} from 'services/pagers/MediaPager';
 import IndexedPager from 'services/pagers/IndexedPager';
 import {getSourceSorting} from 'services/mediaServices/servicesSettings';
 import embySettings from './embySettings';
-import embyApi from './embyApi';
+import embyApi, {getMusicLibraryId} from './embyApi';
 import {embyPlaylistItemsSortMap, getSortParams} from './embySorting';
 import {createMediaObject} from './embyUtils';
 
@@ -71,7 +71,7 @@ export default class EmbyPager<T extends MediaObject> extends IndexedPager<T> {
         initialItems: readonly BaseItemDto[]
     ): Promise<Page<BaseItemDto>> {
         const path = `Users/${embySettings.userId}/Items`;
-        const params = {ParentId: embySettings.libraryId};
+        const params = {ParentId: getMusicLibraryId()};
         const itemType = this.params.IncludeItemTypes;
         const query = this.params.SearchTerm as string;
         let items: readonly BaseItemDto[] = initialItems;
@@ -177,7 +177,7 @@ export class EmbyPlaylistItemsPager extends EmbyPager<MediaItem> {
             super.connect();
             this.subscribeTo(
                 this.observeComplete().pipe(
-                    switchMap(() => observePlaylistAdditions(this.playlist)),
+                    switchMap(() => observePlaylistAdditions(this.playlist.src)),
                     map((items) => this.filterAdditions(items)),
                     filter((items) => items.length > 0),
                     tap((items) => this._addItems(items))

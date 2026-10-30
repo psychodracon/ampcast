@@ -1,8 +1,9 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {defer} from 'rxjs';
 import ItemType from 'types/ItemType';
-import MediaAlbum from 'types/MediaAlbum';
+import LinearType from 'types/LinearType';
 import MediaObject from 'types/MediaObject';
+import MediaType from 'types/MediaType';
 import Thumbnail from 'types/Thumbnail';
 import {Logger} from 'utils';
 import {findThumbnails, getThumbnailUrl, isSameThumbnails} from 'services/metadata';
@@ -25,7 +26,7 @@ export interface CoverArtProps {
 
 export default function CoverArt({item, className = '', placeholder, ...props}: CoverArtProps) {
     const [ready, setReady] = useState(!placeholder);
-    const overlayIcon = item.itemType === ItemType.Album && getOverlayIcon(item);
+    const overlayIcon = getOverlayIcon(item);
 
     useEffect(() => {
         if (!placeholder) {
@@ -36,7 +37,7 @@ export default function CoverArt({item, className = '', placeholder, ...props}: 
 
     return (
         <figure
-            className={`cover-art ${className} ${overlayIcon ? 'cover-art-' + overlayIcon : ''}`}
+            className={`cover-art ${className} ${overlayIcon ? 'cover-art-' + overlayIcon : ''} ${item.synthetic ? 'cover-art-synthetic' : ''}`}
         >
             {ready ? <CoverArtImage {...props} item={item} key={item.src} /> : null}
         </figure>
@@ -49,7 +50,7 @@ function CoverArtImage({item, size, extendedSearch, onLoad, onError}: CoverArtPr
     const hasThumbnails = !!thumbnails?.length;
     const thumbnail = hasThumbnails ? findBestThumbnail(thumbnails, size) : undefined;
     const src = thumbnail ? getThumbnailUrl(thumbnail) : '';
-    const overlayIcon = item.itemType === ItemType.Album && getOverlayIcon(item);
+    const overlayIcon = getOverlayIcon(item);
 
     useEffect(() => {
         setInError(false);
@@ -110,6 +111,8 @@ function CoverArtImage({item, size, extendedSearch, onLoad, onError}: CoverArtPr
                 </div>
             ) : null}
         </>
+    ) : overlayIcon ? (
+        <Icon className="cover-art-image" name={overlayIcon} />
     ) : (
         <MediaIcon className="cover-art-image" item={item} />
     );
@@ -131,23 +134,36 @@ function findBestThumbnail(thumbnails: readonly Thumbnail[], size = 240): Thumbn
     return matches[0];
 }
 
-function getOverlayIcon(item: MediaAlbum): IconName | '' {
-    if (!item.synthetic) {
-        return '';
-    }
-    const [, type] = item.src.split(':');
-    switch (type) {
-        case 'top-tracks':
-            return 'star';
+function getOverlayIcon(item: MediaObject): IconName | '' {
+    if (item.synthetic) {
+        const [, type] = item.src.split(':');
+        switch (type) {
+            case 'top-tracks':
+                return 'star';
 
-        case 'radios':
-            return 'radio';
+            case 'radio':
+            case 'radios':
+            case 'stations':
+            case 'artist-radio':
+            case 'song-radio':
+                return 'radio';
 
-        case 'videos':
-            return 'video';
+            case 'videos':
+                return 'video';
 
-        default:
-            return 'audio';
+            default:
+                return 'audio';
+        }
+    } else {
+        if (item.itemType === ItemType.Media) {
+            return item.linearType === LinearType.Station
+                ? 'radio'
+                : item.mediaType === MediaType.Video
+                  ? 'video'
+                  : '';
+        } else {
+            return '';
+        }
     }
 }
 

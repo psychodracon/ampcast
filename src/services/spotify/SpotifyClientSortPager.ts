@@ -163,7 +163,7 @@ export default class SpotifyClientSortPager<T extends MediaObject> extends Seque
 
     private isArtistAddedAtSort(items: T[], sortBy: string): boolean {
         return (
-            sortBy === 'added_at' &&
+            (sortBy === 'dateAdded' || sortBy === 'added_at') &&
             items.length > 0 &&
             (items[0] as any).itemType === ArtistItemType.Number
         );
@@ -177,11 +177,19 @@ export default class SpotifyClientSortPager<T extends MediaObject> extends Seque
 
     private getPropertyValue(obj: any, path: string): any {
         switch (path) {
+            case 'Title':
+            case 'Name':
             case 'title':
             case 'name':
                 return obj.title || obj.name || '';
+            case 'Artist':
             case 'artist':
                 return obj.artist || obj.albumArtist || '';
+            case 'Album':
+                return obj.album || obj.title || '';
+            case 'Year':
+                return obj.year || 0;
+            case 'dateAdded':
             case 'addedAt':
             case 'added_at':
                 return obj.addedAt || 0;

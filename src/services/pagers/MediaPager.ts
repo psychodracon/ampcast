@@ -7,7 +7,6 @@ import {
     combineLatest,
     distinctUntilChanged,
     filter,
-    fromEvent,
     map,
     skipWhile,
     take,
@@ -15,14 +14,13 @@ import {
 } from 'rxjs';
 import actionsStore from 'services/actions/actionsStore';
 import {getServiceFromSrc} from 'services/mediaServices';
-import {observeSourceSorting} from 'services/mediaServices/servicesSettings';
-import {observeMetadataChanges} from 'services/metadata';
+import {getSourceSorting, observeSourceSorting} from 'services/mediaServices/servicesSettings';
+import {MetadataChange, observeMetadataChanges, observePlaylistEdited} from 'services/metadata';
 import {ConditionalKeys} from 'type-fest';
 import ChildOf from 'types/ChildOf';
 import ItemType from 'types/ItemType';
 import MediaAlbum from 'types/MediaAlbum';
 import MediaObject from 'types/MediaObject';
-import MetadataChange from 'types/MetadataChange';
 import Pager, {PagerConfig} from 'types/Pager';
 import SortParams from 'types/SortParams';
 import {Logger, clamp, exists, uniq} from 'utils';
@@ -60,7 +58,7 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
         protected config: PagerConfig<T>,
         private readonly createChildPager?: CreateChildPager<T>,
     ) {
-        if (__dev__ && !config.pageSize) {
+        if (__dev__ && config.pageSize === undefined) {
             logger.warn('`pageSize` not specified');
         }
     }
@@ -130,7 +128,7 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
         }
     }
 
-    disconnect(): void {
+    disconnect(keepChildrenConnected?: boolean): void {
         if (!this.disconnected) {
             this.#disconnected = true;
             if (this.#subscriptions) {
@@ -142,7 +140,9 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
                     }
                 }
             }
-            this.#items$?.value.forEach((item) => (item as any)?.pager?.disconnect());
+            if (!keepChildrenConnected) {
+                this.#items$?.value.forEach((item) => (item as any)?.pager?.disconnect());
+            }
             this.#items$?.complete();
             this.#additions$?.complete();
             this.#size$?.complete();
@@ -268,7 +268,7 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
     }
 
     protected observeFetches(): Observable<PageFetch> {
-        return this.fetches$.pipe(filter(({length}) => length > 0));
+        return this.fetches$.pipe(filter((fetch) => fetch.length > 0));
     }
 
     protected connect(): void {
@@ -309,15 +309,25 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
             if (this.childSortId && this.createChildPager) {
                 this.subscribeTo(
                     observeSourceSorting(this.childSortId).pipe(
+                        filter(() => this.active),
+                        distinctUntilChanged(),
                         tap((childSort) => this.updateChildSort(this.createChildPager!, childSort)),
                     ),
                     logger,
                 );
             }
 
-            this.subscribeTo(this.observeComplete().pipe(tap(() => (this.busy = false))), logger);
+            if (this.createChildPager) {
+                this.subscribeTo(
+                    observePlaylistEdited().pipe(
+                        filter(() => !this.active),
+                        tap((src) => this.expirePlaylist(src, this.createChildPager!))
+                    ),
+                    logger
+                );
+            }
 
-            fromEvent(window, 'pagehide').subscribe(() => this.disconnect());
+            this.subscribeTo(this.observeComplete().pipe(tap(() => (this.busy = false))), logger);
         }
     }
 
@@ -457,6 +467,26 @@ export default abstract class MediaPager<T extends MediaObject> implements Pager
     public addUserData(items: readonly T[]): void {
         const service = getServiceFromSrc(items[0]);
         service?.addUserData?.(items);
+    }
+
+    private expirePlaylist(src: string, createChildPager: CreateChildPager<T>): void {
+        if (this.items.length === 0) {
+            return;
+        }
+        let changed = false;
+        const items = this.items.map((item) => {
+            if (item.itemType === ItemType.Playlist && item.src === src) {
+                changed = true;
+                item.pager.disconnect();
+                (item as any).pager = createChildPager(item, getSourceSorting(this.childSortId));
+                return {...item};
+            } else {
+                return item;
+            }
+        });
+        if (changed) {
+            this.items = items;
+        }
     }
 
     private updateChildSort(createChildPager: CreateChildPager<T>, childSort?: SortParams): void {

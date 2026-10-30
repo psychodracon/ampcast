@@ -1,5 +1,4 @@
 import {filter, map, switchMap, tap} from 'rxjs';
-import ItemType from 'types/ItemType';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
@@ -9,7 +8,7 @@ import {Logger, uniqBy} from 'utils';
 import {dispatchMetadataChanges, observePlaylistAdditions} from 'services/metadata';
 import SequentialPager from 'services/pagers/SequentialPager';
 import apple from './apple';
-import {createMediaObjects, musicKitFetch, MusicKitItem} from './musicKitUtils';
+import {createMediaObjects, musicKitFetch, MusicKitItem, musicKitParams} from './musicKitUtils';
 
 const logger = new Logger('MusicKitPager');
 
@@ -20,8 +19,7 @@ export interface MusicKitPage extends Page<MusicKitItem> {
 export default class MusicKitPager<T extends MediaObject> extends SequentialPager<T> {
     private nextPageUrl: string | undefined = undefined;
 
-    static toPage(response: any): MusicKitPage {
-        const result = response.data[0]?.relationships?.tracks || response;
+    static toPage(result: any): MusicKitPage {
         const items = result.data || [];
         const nextPageUrl = result.next;
         const total = result.meta?.total;
@@ -32,7 +30,7 @@ export default class MusicKitPager<T extends MediaObject> extends SequentialPage
         href: string,
         params?: MusicKit.QueryParameters,
         options?: Partial<PagerConfig<T>>,
-        private readonly parent?: ParentOf<T>,
+        parent?: ParentOf<T>,
         toPage = MusicKitPager.toPage
     ) {
         super(
@@ -50,13 +48,9 @@ export default class MusicKitPager<T extends MediaObject> extends SequentialPage
                     this.nextPageUrl = result.nextPageUrl;
                     return {items, total, atEnd};
                 } catch (err: any) {
-                    // Apple playlists return 404 if they are empty.
-                    // If it's been deleted then it has no name/title.
-                    if (
-                        err.name === 'NOT_FOUND' &&
-                        parent?.itemType === ItemType.Playlist &&
-                        parent.title
-                    ) {
+                    // Apple often returns 404 if lists are empty.
+                    if (err.name === 'NOT_FOUND') {
+                        logger.warn(err);
                         return {items: [], total: 0, atEnd: true};
                     } else {
                         throw err;
@@ -77,7 +71,7 @@ export class MusicKitPlaylistItemsPager extends MusicKitPager<MediaItem> {
     ) {
         super(
             tracksUrl,
-            {'include[library-songs]': 'catalog'},
+            musicKitParams,
             {
                 pageSize: 100,
                 maxSize: playlist.isChart ? 100 : undefined,
@@ -105,7 +99,7 @@ export class MusicKitPlaylistItemsPager extends MusicKitPager<MediaItem> {
             super.connect();
             this.subscribeTo(
                 this.observeComplete().pipe(
-                    switchMap(() => observePlaylistAdditions(this.playlist)),
+                    switchMap(() => observePlaylistAdditions(this.playlist.src)),
                     map((items) => this.filterAdditions(items)),
                     filter((items) => items.length > 0),
                     tap((items) => this._addItems(items))

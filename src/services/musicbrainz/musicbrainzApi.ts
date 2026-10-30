@@ -6,8 +6,8 @@ import {Logger, RateLimiter, filterNotEmpty, uniq} from 'utils';
 import {
     AddMetadataOptions,
     dispatchMetadataChanges,
-    filterMatches,
     findBestMatch,
+    findMatches,
 } from 'services/metadata';
 import fetchFirstPage from 'services/pagers/fetchFirstPage';
 import MusicBrainzAlbumTracksPager from './MusicBrainzAlbumTracksPager';
@@ -24,7 +24,7 @@ interface LookupItem<T extends MediaItem> {
     index: number;
 }
 
-type MBMediaItem = MediaItem & {
+export type MBMediaItem = MediaItem & {
     musicBrainz: {
         readonly status: string;
         readonly country: string;
@@ -415,13 +415,13 @@ function addMissingValues(
         (values as any).duration = duration || item.duration || 0;
         return values;
     } else {
-        let {duration, track, year, isrc, albumArtist} = item;
+        let {duration, track, year, isrc, albumArtists} = item;
         duration = duration || foundItem.duration;
         track = track || foundItem.track;
         year = year || foundItem.year;
         isrc = isrc || foundItem.isrc;
-        albumArtist = albumArtist || foundItem.albumArtist;
-        return {...values, duration, track, year, isrc, albumArtist};
+        albumArtists = albumArtists || foundItem.albumArtists;
+        return {...values, duration, track, year, isrc, albumArtists};
     }
 }
 
@@ -454,7 +454,7 @@ async function fetchJSON<T>(
 }
 
 function findBestMBMatch(matches: readonly MBMediaItem[], item: MediaItem): MediaItem | undefined {
-    matches = filterMatches(matches, item);
+    matches = findMatches(matches, item);
     matches = filterNotEmpty(matches, (item) => item.musicBrainz.status === 'Official');
     matches = filterNotEmpty(matches, (item) => !item.musicBrainz.secondaryType);
     matches = filterNotEmpty(matches, (item) => item.musicBrainz.primaryType === 'Album');
@@ -515,7 +515,7 @@ export function createMediaItem(
         title: track.title,
         artists: artists?.map((artist) => artist.name),
         album: release.title,
-        albumArtist: albumArtist?.name,
+        albumArtists: albumArtist?.name ? [albumArtist.name] : undefined,
         duration: track.length / 1000 || 0,
         track: Number(track.number),
         recording_mbid: recording.id,

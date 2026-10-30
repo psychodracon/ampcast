@@ -107,3 +107,30 @@ export function uniq<T>(values: readonly T[]): T[] {
 export function uniqBy<T>(key: keyof T, values: readonly T[]): T[] {
     return values.filter((a, index, self) => index === self.findIndex((b) => a[key] === b[key]));
 }
+
+// Return an array of unique values sorted by frequency.
+// If `shuffleSameFrequency` is set then shuffle all the values with the same frequency in the result.
+export function uniqSortedByFrequency<T>(values: readonly T[], shuffleSameFrequency?: boolean): T[] {
+    const valueFrequency = new Map<T, number>();
+    for (const value of values) {
+        const frequency = valueFrequency.get(value) || 0;
+        valueFrequency.set(value, frequency + 1);
+    }
+    const valueFrequencySorted = new Map<T, number>(
+        [...valueFrequency].sort((a, b) => b[1] - a[1])
+    );
+    if (shuffleSameFrequency) {
+        const frequencyValues = new Map<number, T[]>();
+        for (const [value, frequency] of valueFrequencySorted) {
+            const values = frequencyValues.get(frequency) || [];
+            values.push(value);
+            frequencyValues.set(frequency, values);
+        }
+        for (const [frequency, values] of frequencyValues) {
+            frequencyValues.set(frequency, shuffle(values));
+        }
+        return [...frequencyValues.values()].flat();
+    } else {
+        return [...valueFrequencySorted.keys()];
+    }
+}

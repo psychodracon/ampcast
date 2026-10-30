@@ -14,8 +14,11 @@ import MediaServiceId from 'types/MediaServiceId';
 import MediaSource, {AnyMediaSource, MediaMultiSource} from 'types/MediaSource';
 import MediaType from 'types/MediaType';
 import Pager, {PagerConfig} from 'types/Pager';
-import {NoMusicLibraryError, NoMusicVideoLibraryError} from 'services/errors';
+import Pin, {Pinnable} from 'types/Pin';
+import {getItemTypeFromSrc, getMediaObjectId} from 'utils';
+import {NoMusicVideoLibraryError} from 'services/errors';
 import {t} from 'services/i18n';
+import {createSingularMediaSource} from 'services/mediaServices/mediaSources';
 import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
 import SimplePager from 'services/pagers/SimplePager';
 import WrappedPager from 'services/pagers/WrappedPager';
@@ -28,6 +31,7 @@ import {
     recentlyAddedAlbumsLayout,
     recentlyPlayedTracksLayout,
 } from 'components/MediaList/layouts';
+import {getMusicLibraryId} from './jellyfinApi';
 import {
     jellyfinAlbumsSort,
     jellyfinAlbumsSortMap,
@@ -42,7 +46,7 @@ import {createArtistAlbumsPager, createPlaylistItemsPager} from './jellyfinUtils
 
 const serviceId: MediaServiceId = 'jellyfin';
 
-export const jellyfinPlaylistLayout: Partial<MediaListLayout> = {
+export const jellyfinPlaylistsLayout: Partial<MediaListLayout> = {
     card: {
         h1: 'Name',
         h2: 'Genre',
@@ -51,6 +55,96 @@ export const jellyfinPlaylistLayout: Partial<MediaListLayout> = {
     },
     details: ['Name', 'Genre', 'TrackCount', 'Progress'],
 };
+
+export function createSourceFromObject<T extends MediaObject>(src: string): MediaSource<T> {
+    const itemType = getItemTypeFromSrc(src);
+    switch (itemType) {
+        case ItemType.Artist:
+            return createSingularMediaSource<MediaArtist>({
+                src,
+                itemType,
+                secondaryItems: {
+                    sort: jellyfinArtistAlbumsSort,
+                },
+                childSort: jellyfinArtistAlbumsSort.defaultSort,
+                createChildPager: createArtistAlbumsPager,
+            }) as MediaSource<T>;
+
+        case ItemType.Playlist:
+            return createSingularMediaSource<MediaPlaylist>({
+                src,
+                itemType,
+                primaryItems: {
+                    layout: jellyfinPlaylistsLayout,
+                },
+                secondaryItems: {
+                    sort: jellyfinPlaylistItemsSort,
+                },
+                childSort: jellyfinPlaylistItemsSort.defaultSort,
+                createChildPager: createPlaylistItemsPager,
+            }) as MediaSource<T>;
+
+        default:
+            return createSingularMediaSource<T>({
+                src,
+                itemType,
+            });
+    }
+}
+
+export function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
+    return createSingularMediaSource<MediaPlaylist>({
+        src: pin.src,
+        itemType: ItemType.Playlist,
+        isPin: true,
+        primaryItems: {
+            layout: jellyfinPlaylistsLayout,
+        },
+        secondaryItems: {
+            sort: jellyfinPlaylistItemsSort,
+        },
+        childSort: jellyfinPlaylistItemsSort.defaultSort,
+        createChildPager: createPlaylistItemsPager,
+    }) as MediaSource<T>;
+}
+
+export function createRelatedPlaylistsSource<T extends MediaObject>(
+    item: T
+): MediaSource<MediaPlaylist> | undefined {
+    switch (item.itemType) {
+        case ItemType.Media: {
+            const sourceId = `${item.src}/related-playlists`;
+            const songId = getMediaObjectId(item);
+            return {
+                sourceId,
+                id: `${item.src}/related-playlists`,
+                title: 'Related Playlists',
+                icon: 'playlist',
+                itemType: ItemType.Playlist,
+                primaryItems: {
+                    layout: jellyfinPlaylistsLayout,
+                },
+                secondaryItems: {
+                    sort: jellyfinPlaylistItemsSort,
+                },
+
+                search(): Pager<MediaPlaylist> {
+                    return createItemsPager(
+                        {
+                            IncludeItemTypes: 'Playlist',
+                            ListItemIds: songId,
+                        },
+                        {
+                            childSort: jellyfinPlaylistItemsSort.defaultSort,
+                            childSortId: `${sourceId}/2`,
+                        },
+                        createPlaylistItemsPager
+                    );
+                },
+            };
+        }
+    }
+}
 
 export const jellyfinSearch: MediaMultiSource = {
     id: `${serviceId}/search`,
@@ -106,11 +200,11 @@ export const jellyfinSearch: MediaMultiSource = {
                 id: 'playlists',
                 title: 'Playlists',
                 primaryItems: {
-                    layout: jellyfinPlaylistLayout,
+                    layout: jellyfinPlaylistsLayout,
                     sort: {
                         sortOptions: {
                             Name: 'Name',
-                            '': 'Date Added',
+                            'AddedAt': 'Date Added',
                         },
                         defaultSort: {
                             sortBy: 'Name',
@@ -132,7 +226,7 @@ const jellyfinLikedSongs: MediaSource<MediaItem> = {
     title: 'My Songs',
     icon: 'heart',
     itemType: ItemType.Media,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     primaryItems: {
         emptyMessage: t("You don't have any favorite songs."),
         sort: jellyfinSongsSort,
@@ -149,10 +243,11 @@ const jellyfinLikedSongs: MediaSource<MediaItem> = {
 
 const jellyfinLikedAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/liked-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'My Albums',
     icon: 'heart',
     itemType: ItemType.Album,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     primaryItems: {
         emptyMessage: t("You don't have any favorite albums."),
         sort: jellyfinAlbumsSort,
@@ -170,10 +265,11 @@ const jellyfinLikedAlbums: MediaSource<MediaAlbum> = {
 
 const jellyfinLikedArtists: MediaSource<MediaArtist> = {
     id: `${serviceId}/liked-artists`,
+    sourceId: `${serviceId}/artists`,
     title: 'My Artists',
     icon: 'heart',
     itemType: ItemType.Artist,
-    lockActionsStore: true,
+    lockActionType: 'inLibrary',
     defaultHidden: true,
     primaryItems: {
         emptyMessage: t("You don't have any favorite artists."),
@@ -192,7 +288,7 @@ const jellyfinLikedArtists: MediaSource<MediaArtist> = {
             },
             {
                 childSort: jellyfinArtistAlbumsSort.defaultSort,
-                childSortId: `${jellyfinLikedArtists.id}/2`,
+                childSortId: `${jellyfinLikedArtists.sourceId}/2`,
             },
             undefined,
             createArtistAlbumsPager
@@ -258,11 +354,11 @@ const jellyfinPlaylists: MediaSource<MediaPlaylist> = {
     icon: 'playlist',
     itemType: ItemType.Playlist,
     primaryItems: {
-        layout: jellyfinPlaylistLayout,
+        layout: jellyfinPlaylistsLayout,
         sort: {
             sortOptions: {
                 Name: 'Name',
-                '': 'Date Added',
+                'AddedAt': 'Date Added',
             },
             defaultSort: {
                 sortBy: '',
@@ -327,6 +423,7 @@ const jellyfinTracksByGenre: MediaSource<MediaItem> = {
 
 const jellyfinAlbumsByGenre: MediaSource<MediaAlbum> = {
     id: `${serviceId}/albums-by-genre`,
+    sourceId: `${serviceId}/albums`,
     title: 'Albums by Genre',
     icon: 'genre',
     itemType: ItemType.Album,
@@ -349,6 +446,7 @@ const jellyfinAlbumsByGenre: MediaSource<MediaAlbum> = {
 
 const jellyfinArtistsByGenre: MediaSource<MediaArtist> = {
     id: `${serviceId}/artists-by-genre`,
+    sourceId: `${serviceId}/artists`,
     title: 'Artists by Genre',
     icon: 'genre',
     itemType: ItemType.Artist,
@@ -367,7 +465,7 @@ const jellyfinArtistsByGenre: MediaSource<MediaArtist> = {
                 },
                 {
                     childSort: jellyfinArtistAlbumsSort.defaultSort,
-                    childSortId: `${jellyfinArtistsByGenre.id}/2`,
+                    childSortId: `${jellyfinArtistsByGenre.sourceId}/2`,
                 },
                 undefined,
                 createArtistAlbumsPager
@@ -404,6 +502,7 @@ const jellyfinTracksByDecade: MediaSource<MediaItem> = {
 
 const jellyfinAlbumsByDecade: MediaSource<MediaAlbum> = {
     id: `${serviceId}/albums-by-decade`,
+    sourceId: `${serviceId}/albums`,
     title: 'Albums by Decade',
     icon: 'calendar',
     itemType: ItemType.Album,
@@ -444,6 +543,7 @@ const jellyfinRandomTracks: MediaSource<MediaItem> = {
 
 const jellyfinRandomAlbums: MediaSource<MediaAlbum> = {
     id: `${serviceId}/random-albums`,
+    sourceId: `${serviceId}/albums`,
     title: 'Random Albums',
     icon: 'shuffle',
     itemType: ItemType.Album,
@@ -663,12 +763,4 @@ export function createItemsPager<T extends MediaObject>(
         undefined,
         createChildPager
     );
-}
-
-function getMusicLibraryId(): string {
-    const libraryId = jellyfinSettings.libraryId;
-    if (!libraryId) {
-        throw new NoMusicLibraryError();
-    }
-    return libraryId;
 }

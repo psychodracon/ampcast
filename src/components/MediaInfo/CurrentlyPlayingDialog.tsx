@@ -5,6 +5,7 @@ import useCurrentTrack from 'hooks/useCurrentTrack';
 import useCurrentVisualizer from 'hooks/useCurrentVisualizer';
 import useFirstValue from 'hooks/useFirstValue';
 import CurrentlyPlayingTabs from './CurrentlyPlayingTabs';
+import NavigationButton from './NavigationButton';
 import useActiveItem from './useActiveItem';
 import useMediaInfoDialog from './useMediaInfoDialog';
 
@@ -33,6 +34,7 @@ export default function CurrentlyPlayingDialog(props: DialogProps) {
                     <p>No media loaded.</p>
                 )}
                 <footer className="dialog-buttons">
+                    {thisTrack ? <NavigationButton item={thisTrack} /> : null}
                     <Button>Close</Button>
                 </footer>
             </form>

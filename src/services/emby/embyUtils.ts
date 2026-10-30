@@ -1,5 +1,5 @@
-import {SetOptional, Writable} from 'type-fest';
-import type {BaseItemDto} from '@jellyfin/sdk/lib/generated-client/models';
+import {SetFieldType, SetOptional, SetRequired, Writable} from 'type-fest';
+import type {BaseItemDto, NameGuidPair} from '@jellyfin/sdk/lib/generated-client/models';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
@@ -16,12 +16,14 @@ import ParentOf from 'types/ParentOf';
 import PlaybackType from 'types/PlaybackType';
 import SortParams from 'types/SortParams';
 import Thumbnail from 'types/Thumbnail';
-import {getMediaObjectId} from 'utils';
+import {exists, getMediaObjectId, getTextFromHtml, Logger} from 'utils';
 import {MAX_DURATION} from 'services/constants';
-import stationStore from 'services/internetRadio/stationStore';
-import SimplePager from 'services/pagers/SimplePager';
-import WrappedPager from 'services/pagers/WrappedPager';
+import fetchFirstPage from 'services/pagers/fetchFirstPage';
 import pinStore from 'services/pins/pinStore';
+import SimpleMediaPager from 'services/pagers/SimpleMediaPager';
+import SimplePager from 'services/pagers/SimplePager';
+import stationStore from 'services/internetRadio/stationStore';
+import WrappedPager from 'services/pagers/WrappedPager';
 import EmbyPager, {EmbyPlaylistItemsPager} from './EmbyPager';
 import embySettings from './embySettings';
 import {
@@ -30,6 +32,8 @@ import {
     embyPlaylistItemsSort,
     getSortParams,
 } from './embySorting';
+
+const logger = new Logger('embyUtils');
 
 const serviceId: MediaServiceId = 'emby';
 
@@ -57,30 +61,51 @@ export function createMediaObject<T extends MediaObject>(
     }
 }
 
+export function createRelatedItemsPager<T extends MediaObject>(item: T): Pager<T> | undefined {
+    const id = getMediaObjectId(item);
+    switch (item.itemType) {
+        case ItemType.Artist:
+            return new EmbyPager(`Items/${id}/Similar`, {
+                UserId: embySettings.userId,
+            }) as Pager<T>;
+
+        case ItemType.Album:
+            return new EmbyPager(`Items/${id}/Similar`, {
+                ExcludeArtistIds: getMediaObjectId({src: item.links?.artists?.[0] || ''}),
+                UserId: embySettings.userId,
+            }) as Pager<T>;
+    }
+}
+
 function createMediaArtist(artist: BaseItemDto, albumSort?: SortParams): MediaArtist {
     const mediaArtist: Writable<SetOptional<MediaArtist, 'pager'>> = {
         itemType: ItemType.Artist,
         src: `${serviceId}:artist:${artist.Id}`,
         externalUrl: getExternalUrl(artist),
-        title: artist.Name || '',
-        description: artist.Overview || undefined,
+        title: (artist.Name || '').trim(),
+        description: getTextFromHtml(artist.Overview || '', 1) || undefined,
         playCount: artist.UserData?.PlayCount || undefined,
         genres: artist.Genres || undefined,
         inLibrary: artist.UserData?.IsFavorite,
         thumbnails: createThumbnails(artist),
         artist_mbid: artist.ProviderIds?.MusicBrainzArtist ?? undefined,
+        links: {
+            self: artist.Name !== 'Various Artists',
+        },
     };
     mediaArtist.pager = createArtistAlbumsPager(mediaArtist as MediaArtist, albumSort);
     return mediaArtist as MediaArtist;
 }
 
 function createMediaAlbum(album: BaseItemDto): MediaAlbum {
+    const artists = getNamedArtists(album.AlbumArtists);
+    const albumArtist = album.AlbumArtist?.trim();
     return {
         itemType: ItemType.Album,
         src: `${serviceId}:album:${album.Id}`,
         externalUrl: getExternalUrl(album),
-        title: album.Name || '',
-        description: album.Overview ?? undefined,
+        title: (album.Name || '').trim(),
+        description: getTextFromHtml(album.Overview || '', 1) || undefined,
         duration: album.RunTimeTicks ? album.RunTimeTicks / 10_000_000 : 0,
         addedAt: parseDate(album.DateCreated),
         playedAt: parseDate(album.UserData?.LastPlayedDate),
@@ -89,10 +114,14 @@ function createMediaAlbum(album: BaseItemDto): MediaAlbum {
         inLibrary: album.UserData?.IsFavorite,
         thumbnails: createThumbnails(album),
         trackCount: album.ChildCount || undefined,
-        artist: album.AlbumArtist || undefined,
+        artists: artists?.map((artist) => artist.Name) || (albumArtist ? [albumArtist] : undefined),
         year: album.ProductionYear || undefined,
         release_mbid: album.ProviderIds?.MusicBrainzAlbum ?? undefined,
         pager: createAlbumTracksPager(album),
+        links: {
+            self: true,
+            artists: artists?.map((artist) => getArtistLink(artist)),
+        },
     };
 }
 
@@ -103,7 +132,7 @@ function createMediaPlaylist(playlist: BaseItemDto, itemSort?: SortParams): Medi
         itemType: ItemType.Playlist,
         externalUrl: getExternalUrl(playlist),
         title: playlist.Name || '',
-        description: playlist.Overview ?? undefined,
+        description: getTextFromHtml(playlist.Overview || '', 1) || undefined,
         duration: playlist.RunTimeTicks ? playlist.RunTimeTicks / 10_000_000 : 0,
         addedAt: parseDate(playlist.DateCreated),
         playedAt: parseDate(playlist.UserData?.LastPlayedDate),
@@ -115,7 +144,12 @@ function createMediaPlaylist(playlist: BaseItemDto, itemSort?: SortParams): Medi
         isPinned: pinStore.isPinned(src),
         owned: true,
         editable: true,
-        items: {droppable: true},
+        items: {
+            droppable: true,
+        },
+        links: {
+            self: true,
+        },
     };
     mediaPlaylist.pager = createPlaylistItemsPager(mediaPlaylist as MediaPlaylist, itemSort);
     return mediaPlaylist as MediaPlaylist;
@@ -136,18 +170,21 @@ function createMediaFolder(folder: BaseItemDto, parent?: MediaFolder): MediaFold
 }
 
 function createMediaItem(track: BaseItemDto): MediaItem {
+    const artists = getNamedArtists(track.ArtistItems);
+    const albumArtists = getNamedArtists(track.AlbumArtists);
+    const albumArtist = track.AlbumArtist?.trim();
     const isVideo = track.MediaType === 'Video';
     const [source] = track.MediaSources || [];
     const artist_mbid = track.ProviderIds?.MusicBrainzArtist;
     return {
         itemType: ItemType.Media,
         mediaType: isVideo ? MediaType.Video : MediaType.Audio,
-        src: `${serviceId}:${isVideo ? 'video' : 'audio'}:${track.Id}:${
+        src: `${serviceId}:${isVideo ? 'video' : 'song'}:${track.Id}:${
             (track as any).PresentationUniqueKey || ''
         }`,
         externalUrl: getExternalUrl(track),
         fileName: getFileName(track.Path || '') || track.Name || '[unknown]',
-        title: track.Name || '',
+        title: (track.Name || '').trim(),
         duration: track.RunTimeTicks ? track.RunTimeTicks / 10_000_000 : 0,
         year: track.ProductionYear || undefined,
         addedAt: parseDate(track.DateCreated),
@@ -156,13 +193,10 @@ function createMediaItem(track: BaseItemDto): MediaItem {
         genres: track.Genres || undefined,
         thumbnails: createThumbnails(track),
         inLibrary: track.UserData?.IsFavorite,
-        artists: track.Artists?.length
-            ? track.Artists
-            : track.AlbumArtist
-              ? [track.AlbumArtist]
-              : undefined,
-        albumArtist: track.AlbumArtist || undefined,
-        album: track.Album || undefined,
+        artists: artists?.map((artist) => artist.Name) || track.Artists || undefined,
+        albumArtists:
+            albumArtists?.map((artist) => artist.Name) || (albumArtist ? [albumArtist] : undefined),
+        album: (track.Album || undefined)?.trim(),
         disc: track.Album ? track.ParentIndexNumber || undefined : undefined,
         track: track.Album ? track.IndexNumber || 0 : 0,
         track_mbid: track.ProviderIds?.MusicBrainzTrack ?? undefined,
@@ -177,6 +211,12 @@ function createMediaItem(track: BaseItemDto): MediaItem {
                   : undefined
             : track.Container || undefined,
         container: track.Container || undefined,
+        links: {
+            self: true,
+            album: track.Album && track.AlbumId ? `${serviceId}:album:${track.AlbumId}` : undefined,
+            albumArtists: albumArtists?.map((artist) => getArtistLink(artist)),
+            artists: artists?.map((artist) => getArtistLink(artist)),
+        },
     };
 }
 
@@ -204,15 +244,39 @@ export function createArtistAlbumsPager(
     artist: MediaArtist,
     albumSort = embyArtistAlbumsSort.defaultSort
 ): Pager<MediaAlbum> {
-    const allTracks = createArtistAllTracks(artist);
-    const radios = createArtistRadios(artist);
-    const otherTracksPager = new SimplePager<MediaAlbum>([allTracks, radios]);
     const albumsPager = new EmbyPager<MediaAlbum>(`Users/${embySettings.userId}/Items`, {
         AlbumArtistIds: getMediaObjectId(artist),
         IncludeItemTypes: 'MusicAlbum',
         ...getSortParams(albumSort, embyArtistAlbumsSortMap),
     });
-    return new WrappedPager(undefined, albumsPager, otherTracksPager);
+    if (artist.title === 'Various Artists') {
+        return albumsPager;
+    }
+    const createSyntheticAlbums = (...albums: MediaAlbum[]) =>
+        new SimpleMediaPager<MediaAlbum>(async () => {
+            const result = await Promise.all<MediaAlbum | undefined>(
+                albums.map(async (album) => {
+                    try {
+                        const items = await fetchFirstPage(album.pager, {keepAlive: true});
+                        if (items.length === 0) {
+                            album.pager.disconnect();
+                        } else {
+                            return album;
+                        }
+                    } catch (err) {
+                        logger.error(err);
+                        album.pager.disconnect();
+                    }
+                })
+            );
+            return result.filter(exists);
+        });
+    const allTracks = createArtistAllTracks(artist);
+    const allTracksPager = new SimplePager<MediaAlbum>([allTracks]);
+    const radios = createArtistRadios(artist);
+    const videos = createArtistVideos(artist);
+    const topPager = createSyntheticAlbums(videos, radios);
+    return new WrappedPager(topPager, albumsPager, allTracksPager);
 }
 
 function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
@@ -220,11 +284,14 @@ function createArtistAllTracks(artist: MediaArtist): MediaAlbum {
         itemType: ItemType.Album,
         src: `${serviceId}:all-tracks:${getMediaObjectId(artist)}`,
         title: 'All Songs',
-        artist: artist.title,
+        artists: [artist.title],
         thumbnails: artist.thumbnails,
         pager: createAllTracksPager(artist),
         trackCount: undefined,
         synthetic: true,
+        links: {
+            artists: [getArtistLink(artist)],
+        },
     };
 }
 
@@ -239,6 +306,32 @@ function createAllTracksPager(artist: MediaArtist): Pager<MediaItem> {
         },
         {autofill: true}
     );
+}
+
+function createArtistVideos(artist: MediaArtist): MediaAlbum {
+    const artistId = getMediaObjectId(artist);
+    return {
+        itemType: ItemType.Album,
+        src: `${serviceId}:videos:${artistId}`,
+        title: 'Music Videos',
+        artists: [artist.title],
+        thumbnails: artist.thumbnails,
+        pager: createArtistVideosPager(artistId),
+        trackCount: undefined,
+        synthetic: true,
+        links: {
+            artists: [artist.src],
+        },
+    };
+}
+
+export function createArtistVideosPager(artistId: string): Pager<MediaItem> {
+    return new EmbyPager(`Users/${embySettings.userId}/Items`, {
+        IncludeItemTypes: 'MusicVideo',
+        ArtistIds: artistId,
+        SortBy: 'ProductionYear,PremiereDate,SortName',
+        SortOrder: 'Descending,Descending,Ascending',
+    });
 }
 
 function createArtistRadios(artist: MediaArtist): MediaAlbum {
@@ -262,11 +355,14 @@ function createArtistRadios(artist: MediaArtist): MediaAlbum {
         itemType: ItemType.Album,
         src: `${serviceId}:radios:${id}`,
         title: 'Radios',
-        artist: artist.title,
+        artists: [artist.title],
         thumbnails: artist.thumbnails,
         pager: new SimplePager([radio]),
         trackCount: undefined,
         synthetic: true,
+        links: {
+            artists: [getArtistLink(artist)],
+        },
     };
 }
 
@@ -313,12 +409,29 @@ function createFolderPager(folder: MediaFolder, parent?: MediaFolder): Pager<Med
     }
 }
 
+function getArtistLink(artist: NameGuidPair | MediaArtist): string {
+    if ('itemType' in artist) {
+        return artist.title === 'Various Artists' ? '' : artist.src;
+    } else {
+        const id = artist.Name === 'Various Artists' ? '' : artist.Id;
+        return id ? `${serviceId}:artist:${id}` : '';
+    }
+}
+
 function getExternalUrl(item: BaseItemDto): string {
     return `${embySettings.host}/web/index.html#!/item?id=${item.Id}&serverId=${embySettings.serverId}`;
 }
 
 function getFileName(path: string): string | undefined {
     return path.split(/[/\\]/).pop();
+}
+
+type HasName = SetFieldType<SetRequired<NameGuidPair, 'Name'>, 'Name', string>;
+function getNamedArtists(
+    artists: readonly NameGuidPair[] | null | undefined
+): readonly HasName[] | undefined {
+    artists = artists?.filter((artist) => !!artist.Name);
+    return artists?.length ? (artists as HasName[]) : undefined;
 }
 
 function parseDate(date?: string | null): number | undefined {

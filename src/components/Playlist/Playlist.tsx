@@ -145,7 +145,10 @@ export default function Playlist({onSelect, onPlay, onEject, ref, ...props}: Pla
                     break;
 
                 case 'info':
-                    await showMediaInfoDialog(selectedItems[0], {scrobblingOptions: true});
+                    await showMediaInfoDialog(selectedItems[0], {
+                        allowNavigation: true,
+                        scrobblingOptions: true,
+                    });
                     break;
 
                 case 'select-all':

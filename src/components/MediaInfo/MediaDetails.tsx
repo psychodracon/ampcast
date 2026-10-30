@@ -10,24 +10,26 @@ import {copyMediaObjectToClipboard} from 'services/reporting';
 import {CopyButton} from 'components/Button';
 import DetailsBox from 'components/ListView/DetailsBox';
 import {MediaInfoProps} from './MediaInfo';
+import useActiveItem from './useActiveItem';
 import './MediaDetails.scss';
 
 export default function MediaDetails<T extends MediaObject>({item}: MediaInfoProps<T>) {
+    const activeItem = useActiveItem(item);
     const [value, setValue] = useState<any>();
 
     const object = useMemo(() => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const {pager, parentFolder, ...object} = item as any;
+        const {pager, parentFolder, ...object} = activeItem as any;
         return object;
-    }, [item]);
+    }, [activeItem]);
 
     const handleCopyClick = useCallback(async () => {
         await copyToClipboard(value);
     }, [value]);
 
     const handleCopyAllClick = useCallback(async () => {
-        await copyMediaObjectToClipboard(item);
-    }, [item]);
+        await copyMediaObjectToClipboard(activeItem);
+    }, [activeItem]);
 
     const renderItem = useCallback((value: any, key: keyof T) => {
         switch (key) {

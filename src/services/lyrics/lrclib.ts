@@ -1,9 +1,9 @@
-import {filterMatches} from 'services/metadata';
 import ItemType from 'types/ItemType';
 import Lyrics, {SyncedLyric} from 'types/Lyrics';
 import MediaItem from 'types/MediaItem';
 import MediaType from 'types/MediaType';
 import {filterNotEmpty, uniqBy} from 'utils';
+import {findMatches} from 'services/metadata';
 
 type LyricsItem = MediaItem & Pick<LRCLIB.Lyrics, 'plainLyrics' | 'syncedLyrics'>;
 
@@ -27,7 +27,7 @@ async function getLyrics(item: MediaItem): Promise<Lyrics | null> {
         let matches: readonly LyricsItem[] = data
             .filter((data) => !!(data.plainLyrics || data.syncedLyrics))
             .map((data) => createMediaItem(data));
-        matches = filterMatches(matches, item);
+        matches = findMatches(matches, item);
         matches = filterNotEmpty(matches, (match) => !!match.syncedLyrics);
         matches = matches.toSorted(
             (a, b) => Math.abs(a.duration - item.duration) - Math.abs(b.duration - item.duration)

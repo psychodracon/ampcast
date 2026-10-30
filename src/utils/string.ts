@@ -25,6 +25,13 @@ export function checkVersion(currentVersion: string, requiredVersion: string): b
     return semverGte(semverCoerce(currentVersion)!, requiredVersion);
 }
 
+export function removeSymbols(string: string): string {
+    return string
+        .replace(/[\x21-\x2f]|[\x3a-\x40]|[\x5b-\x60]|[\x7b-\x7f]/g, '')
+        .replace(/\s\s+/g, ' ')
+        .trim();
+}
+
 export function stringContainsMusic(text: string): boolean {
     return /m[uú][sz](i|ie)[ckq]/i.test(text);
 }

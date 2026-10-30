@@ -1,7 +1,11 @@
 import React from 'react';
 import ItemType from 'types/ItemType';
-import MediaSource, {MediaSourceItems} from 'types/MediaSource';
+import MediaAlbum from 'types/MediaAlbum';
+import MediaSource from 'types/MediaSource';
+import {SortField} from 'types/MediaListSort';
+import SortParams from 'types/SortParams';
 import {getMediaLabel} from 'utils';
+import {getMediaListId, getMediaSourceItems} from 'services/mediaServices/mediaSources';
 import {
     getSourceSorting,
     setSourceView,
@@ -16,13 +20,13 @@ import PopupMenu, {
     showPopupMenu,
 } from 'components/PopupMenu';
 
-interface ShowMediaSourceMenuParams {
-    source: MediaSource;
+export interface ShowMediaSourceMenuParams {
+    source: MediaSource<any>;
     target: HTMLElement;
     x: number;
     y: number;
     isSearch?: boolean;
-    syntheticAlbumSource?: MediaSource | null;
+    syntheticAlbum?: MediaAlbum;
 }
 
 export async function showMediaSourceMenu({
@@ -40,23 +44,23 @@ export async function showMediaSourceMenu({
     );
 }
 
-export type MediaSourceMenuProps = Pick<
+export type MediaSourceMenuItemsProps = Pick<
     ShowMediaSourceMenuParams,
-    'source' | 'isSearch' | 'syntheticAlbumSource'
+    'source' | 'isSearch' | 'syntheticAlbum'
 >;
 
 function MediaSourceMenu({
     source,
     isSearch,
-    syntheticAlbumSource,
+    syntheticAlbum,
     ...props
-}: PopupMenuProps & MediaSourceMenuProps) {
+}: PopupMenuProps & MediaSourceMenuItemsProps) {
     return (
         <PopupMenu {...props}>
             <MediaSourceMenuItems
                 source={source}
                 isSearch={isSearch}
-                syntheticAlbumSource={syntheticAlbumSource}
+                syntheticAlbum={syntheticAlbum}
             />
         </PopupMenu>
     );
@@ -65,16 +69,21 @@ function MediaSourceMenu({
 export function MediaSourceMenuItems({
     source,
     isSearch,
-    syntheticAlbumSource,
-}: MediaSourceMenuProps) {
-    const primaryMenuItems = getMenuItems(source, 1, source.itemType, isSearch);
+    syntheticAlbum,
+}: MediaSourceMenuItemsProps) {
+    const primaryMenuItems = getMenuItems(source, 1, source.itemType, syntheticAlbum, isSearch);
     let secondaryMenuItems: MenuItems | undefined;
     let tertiaryMenuItems: MenuItems | undefined;
-    if (source.secondaryItems?.layout?.view !== 'none' && source.itemType !== ItemType.Media) {
+    if (source.singular && source.itemType === ItemType.Media) {
+        secondaryMenuItems = getMenuItems(source, 2, ItemType.Media, syntheticAlbum);
+    } else if (
+        source.secondaryItems?.layout?.view !== 'none' &&
+        source.itemType !== ItemType.Media
+    ) {
         const itemType = source.itemType === ItemType.Artist ? ItemType.Album : ItemType.Media;
-        secondaryMenuItems = getMenuItems(source, 2, itemType);
+        secondaryMenuItems = getMenuItems(source, 2, itemType, syntheticAlbum);
         if (source.tertiaryItems?.layout?.view !== 'none' && source.itemType === ItemType.Artist) {
-            tertiaryMenuItems = getMenuItems(syntheticAlbumSource || source, 3, ItemType.Media);
+            tertiaryMenuItems = getMenuItems(source, 3, ItemType.Media, syntheticAlbum);
         }
     }
     if (secondaryMenuItems) {
@@ -126,20 +135,26 @@ function getMenuItems(
     source: MediaSource<any>,
     level: 1 | 2 | 3,
     itemType: ItemType,
+    syntheticAlbum?: MediaAlbum,
     isSearch?: boolean
 ): MenuItems {
-    const id = `${source.sourceId || source.id}/${level}`;
-    const items: MediaSourceItems | undefined =
-        level === 3
-            ? source.tertiaryItems
-            : level === 2
-              ? source.secondaryItems
-              : source.primaryItems;
+    const id = getMediaListId(source, level, syntheticAlbum);
+    const items = getMediaSourceItems(source, level, syntheticAlbum);
     const menuItems: MenuItems = {
-        label: items?.label || getDefaultLabel(source.id, itemType),
+        label: items.label || getDefaultLabel(source.id, itemType),
     };
-    if (items?.sort && !isSearch) {
-        const sorting = getSourceSorting(id) || items.sort.defaultSort;
+    if (source?.singular && level === 1) {
+        return menuItems;
+    }
+    const listView = document.querySelector<HTMLElement>(
+        `.history-item:not([hidden]) [data-list-id="${id}"]`
+    );
+    if (items.sort && !isSearch) {
+        const sortBy = listView?.dataset.sortBy;
+        const sortOrder = Number(listView?.dataset.sortOrder) || 0;
+        const currentSort = sortBy && sortOrder ? ({sortBy, sortOrder} as SortParams) : undefined;
+        const defaultSort = items.sort.defaultSort;
+        const sorting = currentSort || getSourceSorting(id) || defaultSort;
         const sortOptions = items.sort.sortOptions || {};
         const sortKeys = Object.keys(sortOptions);
         if (sortKeys.length > 1) {
@@ -148,9 +163,14 @@ function getMenuItems(
                     <PopupMenuItemGroup>
                         {sortKeys.map((sortBy) => (
                             <PopupMenuItemRadio
-                                label={`Sort by: ${sortOptions[sortBy]}`}
+                                label={`Sort by: ${sortOptions[sortBy as SortField]}`}
                                 checked={sorting.sortBy === sortBy}
-                                onClick={() => setSourceSorting(id, {...sorting, sortBy})}
+                                onClick={() =>
+                                    setSourceSorting(id, {
+                                        sortBy,
+                                        sortOrder: guessBestSortOrder(sortBy, defaultSort),
+                                    })
+                                }
                                 key={sortBy}
                             />
                         ))}
@@ -174,8 +194,7 @@ function getMenuItems(
             );
         }
     }
-    const views = items?.layout?.views || ['card', 'card compact', 'card small', 'details'];
-    const listView = document.getElementById(id);
+    const views = items.layout?.views || ['card', 'card compact', 'card small', 'details'];
     const currentView = listView?.dataset.view;
     menuItems.view = views.length ? (
         <PopupMenuItemGroup>
@@ -217,4 +236,24 @@ function getViewName(view: string): string {
 function getDefaultLabel(sourceId: string, itemType: ItemType): string {
     const [serviceId] = sourceId.split('/');
     return getMediaLabel(itemType, serviceId);
+}
+
+function guessBestSortOrder(sortBy: string, defaultSort: SortParams): 1 | -1 {
+    if (sortBy === defaultSort.sortBy) {
+        return defaultSort.sortOrder;
+    }
+    switch (sortBy) {
+        case 'Year':
+        case 'AddedAt':
+        case 'ModifiedAt':
+        case 'Released':
+        case 'ListenDate':
+        case 'LastPlayed':
+        case 'Rating':
+        case 'dateAdded':
+        case 'starred_at':
+            return -1;
+        default:
+            return 1;
+    }
 }

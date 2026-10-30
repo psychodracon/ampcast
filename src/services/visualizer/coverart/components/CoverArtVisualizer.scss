@@ -97,6 +97,7 @@
 
         .media:fullscreen & {
             --thumbnail-width: min(var(--thumbnail-size), 67vh);
+            border-radius: 0;
         }
 
         &[hidden] {
@@ -111,6 +112,19 @@
         .cover-art {
             position: absolute;
             inset: 0;
+
+            &-icon-overlay {
+                background-color: transparent;
+            }
+
+            &-icon {
+                --shadow-depth: max(1px, 0.0625em);
+                --shadow: var(--shadow-depth) var(--shadow-depth) 0 rgba(16, 16, 16, 0.8);
+                width: 15%;
+                height: 15%;
+                color: var(--text-color);
+                filter: drop-shadow(var(--shadow));
+            }
         }
 
         &-thumbnail,

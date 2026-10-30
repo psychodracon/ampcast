@@ -9,9 +9,6 @@ import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaServiceId from 'types/MediaServiceId';
-import MediaSource from 'types/MediaSource';
-import Pager from 'types/Pager';
-import Pin, {Pinnable} from 'types/Pin';
 import PlaybackType from 'types/PlaybackType';
 import PublicMediaService from 'types/PublicMediaService';
 import ServiceType from 'types/ServiceType';
@@ -19,7 +16,7 @@ import {chunk, groupBy} from 'utils';
 import actionsStore from 'services/actions/actionsStore';
 import {dispatchMetadataChanges} from 'services/metadata';
 import fetchAllTracks from 'services/pagers/fetchAllTracks';
-import fetchFirstPage, {fetchFirstItem} from 'services/pagers/fetchFirstPage';
+import fetchFirstPage from 'services/pagers/fetchFirstPage';
 import SimplePager from 'services/pagers/SimplePager';
 import MusicKitPager, {MusicKitPage} from './MusicKitPager';
 import {
@@ -33,7 +30,21 @@ import {
     reconnect,
 } from './appleAuth';
 import appleSettings from './appleSettings';
-import appleSources, {appleEditablePlaylists, appleSearch} from './appleSources';
+import appleSources, {
+    appleEditablePlaylists,
+    appleSearch,
+    createRelatedPlaylistsSource,
+    createSourceFromObject,
+    createSourceFromPin,
+} from './appleSources';
+import {
+    createMediaObject,
+    createRelatedItemsPager,
+    createSongsPager,
+    musicKitFetch,
+    MusicKitItem,
+    musicKitParams,
+} from './musicKitUtils';
 import Credentials from './components/AppleCredentials';
 import Login from './components/AppleLogin';
 import StreamingSettings from './components/AppleStreamingSettings';
@@ -48,6 +59,7 @@ const apple: PublicMediaService = {
     url: 'https://music.apple.com',
     credentialsUrl: 'https://developer.apple.com',
     serviceType: ServiceType.PublicMedia,
+    browsable: true,
     internetRequired: true,
     Components: {Credentials, Login, StreamingSettings},
     get credentialsLocked(): boolean {
@@ -73,6 +85,10 @@ const apple: PublicMediaService = {
     canStore,
     compareForRating,
     createPlaylist,
+    createRelatedPlaylistsSource,
+    createRelatedItemsPager,
+    createSongsPager,
+    createSourceFromObject,
     createSourceFromPin,
     getDroppedItems,
     getFilters,
@@ -188,38 +204,6 @@ async function createPlaylist<T extends MediaItem>(
 
 function compareForRating<T extends MediaObject>(a: T, b: T): boolean {
     return a.src === b.src;
-}
-
-function createSourceFromPin<T extends Pinnable>(pin: Pin): MediaSource<T> {
-    if (pin.itemType !== ItemType.Playlist) {
-        throw Error('Unsupported Pin type.');
-    }
-    return {
-        title: pin.title,
-        itemType: pin.itemType,
-        id: pin.src,
-        sourceId: `${serviceId}/pinned-playlist`,
-        icon: 'pin',
-        isPin: true,
-
-        search(): Pager<T> {
-            const [, type, id] = pin.src.split(':');
-            const isLibraryItem = type.startsWith('library-');
-            const path = isLibraryItem ? '/v1/me/library' : '/v1/catalog/{{storefrontId}}';
-            return new MusicKitPager(
-                `${path}/playlists/${id}`,
-                isLibraryItem
-                    ? {
-                          'include[library-playlists]': 'catalog',
-                          'fields[library-playlists]': 'name,playParams,artwork,canEdit',
-                      }
-                    : {
-                          'omit[resource:playlists]': 'relationships',
-                      },
-                {pageSize: 0}
-            );
-        },
-    };
 }
 
 async function getDroppedItems(
@@ -346,18 +330,29 @@ async function getGenres(filterType: FilterType): Promise<readonly MediaFilter[]
 }
 
 async function getMediaObject<T extends MediaObject>(src: string): Promise<T> {
-    src = getSrcFromUrl(src);
     const [, type, id] = src.split(':');
-    const isLibraryItem = type.startsWith('library-');
-    const path = isLibraryItem ? '/v1/me/library' : '/v1/catalog/{{storefrontId}}';
-    const pager = new MusicKitPager<T>(
-        `${path}/${type.replace('library-', '')}/${id}${isLibraryItem ? '/catalog' : ''}`,
-        isLibraryItem
-            ? undefined
-            : {[`omit[resource:${type.replace('library-', '')}]`]: 'relationships'},
-        {passive: true, pageSize: 0}
-    );
-    return fetchFirstItem<T>(pager, {timeout: 2000});
+    const path = type.startsWith('library-') ? '/v1/me/library' : '/v1/catalog/{{storefrontId}}';
+    const [
+        {
+            data: {
+                data: [object],
+            },
+        },
+        [inLibrary],
+    ] = await Promise.all([
+        musicKitFetch<{data: {data: readonly MusicKitItem[]}}>(
+            `${path}/${type.replace('library-', '')}/${id}`,
+            musicKitParams
+        ),
+        type.startsWith('library-')
+            ? Promise.resolve([true])
+            : type === 'artists'
+              ? Promise.resolve([])
+              : getInLibrary(type, [id]),
+    ]);
+    const item = createMediaObject<T>(object);
+    (item as any).inLibrary = inLibrary;
+    return item;
 }
 
 async function getPlaybackType(): Promise<PlaybackType> {

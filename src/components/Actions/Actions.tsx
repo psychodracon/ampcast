@@ -1,4 +1,4 @@
-import React, {useCallback} from 'react';
+import React, {useCallback, useContext} from 'react';
 import Action from 'types/Action';
 import ItemType from 'types/ItemType';
 import LibraryAction from 'types/LibraryAction';
@@ -12,16 +12,14 @@ import {isServiceVisible} from 'services/mediaServices/servicesSettings';
 import {IconButton, IconButtons, PopupMenuButton} from 'components/Button';
 import {IconName} from 'components/Icon';
 import StarRating from 'components/StarRating';
-import {showActionsMenu} from './ActionsMenu';
 import {AddToPlaylistButton} from './PlaylistActions';
+import ShowActionsMenuContext from './ShowActionsMenuContext';
 import performAction from './performAction';
 
 export interface ActionsProps {
     item: MediaObject;
-    inListView?: boolean; // Rendered in a `ListView` component.
-    inInfoView?: boolean; // Rendered in a `MediaInfo` component.
+    location?: 'list' | 'header' | 'info';
     parentPlaylist?: MediaPlaylist;
-    showMenu?: typeof showActionsMenu;
 }
 
 const defaultActionIcons: Record<LibraryAction, IconName> = {
@@ -36,15 +34,11 @@ const defaultActionLabels: Record<LibraryAction, string> = {
     [Action.Rate]: 'Rate',
 };
 
-export default function Actions({
-    item,
-    inListView,
-    inInfoView,
-    parentPlaylist,
-    showMenu = showActionsMenu,
-}: ActionsProps) {
+export default function Actions({item, location = 'list', parentPlaylist}: ActionsProps) {
+    const showMenu = useContext(ShowActionsMenuContext);
     const service = getServiceFromSrc(item);
     const internetRadio = getService('internet-radio');
+    const inListView = location === 'list';
     const tabIndex = inListView ? -1 : undefined;
 
     const togglePin = useCallback(() => {
@@ -76,7 +70,12 @@ export default function Actions({
     const handleMenuClick = useCallback(
         async (button: HTMLButtonElement) => {
             const {right, bottom} = button.getBoundingClientRect();
-            const action = await showMenu([item], button, right, bottom, 'right', {
+            const action = await showMenu({
+                items: [item],
+                target: button,
+                x: right,
+                y: bottom,
+                align: 'right',
                 inListView,
                 parentPlaylist,
             });
@@ -100,7 +99,7 @@ export default function Actions({
 
     return (
         <IconButtons>
-            {!inInfoView ? (
+            {location !== 'info' ? (
                 <PopupMenuButton
                     title="More…"
                     tabIndex={tabIndex}
@@ -109,11 +108,11 @@ export default function Actions({
                 />
             ) : null}
 
-            {!inListView && item.itemType === ItemType.Media ? (
+            {location === 'info' && item.itemType === ItemType.Media ? (
                 <AddToPlaylistButton item={item} />
             ) : null}
 
-            {!inListView && item.rating !== undefined && service?.canRate?.(item, inListView) ? (
+            {location === 'info' && item.rating !== undefined && service?.canRate?.(item, inListView) ? (
                 <StarRating
                     value={item.rating}
                     increment={service.starRatingIncrement}

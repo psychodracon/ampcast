@@ -1,16 +1,16 @@
 import React, {useRef} from 'react';
 import ItemType from 'types/ItemType';
 import MediaObject from 'types/MediaObject';
-import preferences from 'services/preferences';
 import Button from 'components/Button';
 import Dialog, {DialogProps, showDialog} from 'components/Dialog';
-import MediaInfo from './MediaInfo';
+import useFirstValue from 'hooks/useFirstValue';
 import MediaInfoTabs from './MediaInfoTabs';
-import useActiveItem from './useActiveItem';
+import NavigationButton from './NavigationButton';
 import useMediaInfoDialog from './useMediaInfoDialog';
 import './MediaInfoDialog.scss';
 
 export interface MediaInfoDialogOptions {
+    allowNavigation?: boolean;
     scrobblingOptions?: boolean;
 }
 
@@ -29,23 +29,21 @@ export async function showMediaInfoDialog<T extends MediaObject>(
 
 export default function MediaInfoDialog<T extends MediaObject>({
     item,
+    allowNavigation,
     scrobblingOptions,
     ...props
 }: MediaInfoDialogProps<T>) {
     const ref = useRef<HTMLDialogElement>(null);
-    const activeItem = useActiveItem(item);
-    const title = useTitle(activeItem);
+    const initialItem = useFirstValue(item);
+    const title = useTitle(initialItem);
     useMediaInfoDialog(ref);
 
     return (
         <Dialog {...props} className="media-info-dialog" icon="info" title={title} ref={ref}>
             <form method="dialog">
-                {preferences.mediaInfoTabs ? (
-                    <MediaInfoTabs item={activeItem} scrobblingOptions={scrobblingOptions} />
-                ) : (
-                    <MediaInfo item={activeItem} scrobblingOptions={scrobblingOptions} />
-                )}
+                <MediaInfoTabs item={initialItem} scrobblingOptions={scrobblingOptions} />
                 <footer className="dialog-buttons">
+                    {allowNavigation ? <NavigationButton item={initialItem} /> : null}
                     <Button>Close</Button>
                 </footer>
             </form>

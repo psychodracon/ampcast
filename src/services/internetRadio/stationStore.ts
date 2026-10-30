@@ -4,7 +4,12 @@ import Dexie, {liveQuery} from 'dexie';
 import MediaItem from 'types/MediaItem';
 import MediaObject from 'types/MediaObject';
 import {Logger} from 'utils';
-import {dispatchMetadataChanges, titleCompare} from 'services/metadata';
+import {
+    dispatchMetadataChanges,
+    removeUserData,
+    titleCompare,
+    userDataKeys,
+} from 'services/metadata';
 
 const logger = new Logger('stationStore');
 
@@ -17,9 +22,22 @@ class StationStore extends Dexie {
     constructor() {
         super('ampcast/stations');
 
-        this.version(1).stores({
-            favorites: `&src`,
-        });
+        this.version(2)
+            .stores({
+                favorites: `&src`,
+            })
+            .upgrade((tx) => {
+                return tx
+                    .table('favorites')
+                    .toCollection()
+                    .modify((favorite) => {
+                        for (const key of userDataKeys) {
+                            delete favorite[key];
+                        }
+                        favorite.editable = true;
+                        favorite.isFavoriteStation = true;
+                    });
+            });
 
         liveQuery(() => this.favorites.toArray()).subscribe((favorites) =>
             favorites$.next(favorites.sort((a, b) => titleCompare(a.title, b.title)))
@@ -38,8 +56,8 @@ class StationStore extends Dexie {
             await this.favorites.bulkPut(
                 stations.map((station) => {
                     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                    const {parentFolder, ...favorite} = station as any;
-                    return {...favorite, isFavoriteStation: true};
+                    const {parentFolder, ...favorite} = removeUserData(station) as any;
+                    return {...favorite, isFavoriteStation: true, editable: true};
                 })
             );
             dispatchMetadataChanges(

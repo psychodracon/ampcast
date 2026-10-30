@@ -1,6 +1,7 @@
 import React from 'react';
 import {Except} from 'type-fest';
 import Action from 'types/Action';
+import AlbumType from 'types/AlbumType';
 import ItemType from 'types/ItemType';
 import LinearType from 'types/LinearType';
 import MediaAlbum from 'types/MediaAlbum';
@@ -11,13 +12,20 @@ import {Field} from 'types/MediaListLayout';
 import MediaObject from 'types/MediaObject';
 import MediaPlaylist from 'types/MediaPlaylist';
 import MediaType from 'types/MediaType';
-import {getElapsedTimeText} from 'utils';
+import {getElapsedTimeText, srcToPath} from 'utils';
 import {getServiceFromSrc} from 'services/mediaServices';
 import {ColumnSpec} from 'components/ListView';
 import {performAction} from 'components/Actions';
-import {Badge, BitRateBadge, ExplicitBadge, LivePlaybackBadge} from 'components/Badges';
+import {
+    AlbumTypeBadge,
+    Badge,
+    BitRateBadge,
+    ExplicitBadge,
+    LivePlaybackBadge,
+} from 'components/Badges';
 import CoverArt from 'components/CoverArt';
 import Icon, {IconName, Flag} from 'components/Icon';
+import InternalLink from 'components/InternalLink';
 import MediaSourceLabel from 'components/MediaSources/MediaSourceLabel';
 import ScrobblingOptions from 'components/MediaInfo/ScrobblingOptions';
 import StarRating from 'components/StarRating';
@@ -31,14 +39,32 @@ type RenderField<T extends MediaObject = MediaObject> = ColumnSpec<T>['render'];
 
 const Index: RenderField = (_, info) => <Text value={info.rowIndex + 1} />;
 
-const Title: RenderField = (item) => {
+const Title: RenderField = (item, info) => {
+    const linkToSelf = item.links?.self;
     return (
         <span className="title-with-badge">
-            <span className="text">{item.title}</span>
+            {linkToSelf ? (
+                <InternalLink
+                    className="text"
+                    path={srcToPath(linkToSelf === true ? item.src : linkToSelf)}
+                >
+                    {item.title}
+                </InternalLink>
+            ) : (
+                <Text value={item.title} />
+            )}
             {item.itemType === ItemType.Media && item.isLivePlayback ? (
                 <>
                     {' '}
                     <LivePlaybackBadge item={item} />
+                </>
+            ) : null}
+            {info.view !== 'details' &&
+            item.itemType === ItemType.Album &&
+            item.albumType === AlbumType.Single ? (
+                <>
+                    {' '}
+                    <AlbumTypeBadge item={item} />
                 </>
             ) : null}
             {item.itemType === ItemType.Media || item.itemType === ItemType.Album ? (
@@ -66,7 +92,7 @@ export const IconTitle: RenderField = (item, info) => {
     return <MediaSourceLabel icon={icon} text={Title(item, info)} />;
 };
 
-const BitRate: RenderField<MediaItem> = (item) => <Text value={item.bitRate} />;
+const BitRate: RenderField<MediaItem> = (item) => <Text value={item.bitRate || ''} />;
 
 const Bpm: RenderField<MediaItem> = (item) => <Text value={item.bpm || ''} />;
 
@@ -87,7 +113,7 @@ const Track: RenderField<MediaItem> = (item) => (
     </span>
 );
 
-const Disc: RenderField<MediaItem> = (item) => <Text value={item.disc} />;
+const Disc: RenderField<MediaItem> = (item) => <Text value={item.disc || ''} />;
 
 const MultiDisc: RenderField<MediaAlbum> = (item) => <Text value={item.multiDisc} />;
 
@@ -95,15 +121,71 @@ const Copyright: RenderField<MediaAlbum | MediaItem> = (item) => <Text value={it
 
 const Position: RenderField = (item) => <Text value={item.position || '-'} />;
 
-const Artist: RenderField<MediaAlbum | MediaItem> = (item) => (
-    <Text value={item.itemType === ItemType.Media ? item.artists?.join(', ') : item.artist} />
-);
+const Artist: RenderField<MediaAlbum | MediaItem> = (item) => {
+    return item.links?.artists ? (
+        <>
+            {item.artists
+                ?.map((artist, index) => {
+                    const link = item.links!.artists![index];
+                    return link ? (
+                        <InternalLink className="text" path={srcToPath(link)}>
+                            {artist}
+                        </InternalLink>
+                    ) : (
+                        <Text value={artist} />
+                    );
+                })
+                // This is basically `Array.join(',')` in React.
+                .reduce(
+                    (list: React.JSX.Element | null, item: React.JSX.Element | null) =>
+                        // prettier-ignore
+                        list ? (<>{list}, {item}</>) : item,
+                    null
+                )}
+        </>
+    ) : (
+        <Text value={item.artists?.join(', ')} />
+    );
+};
 
-const Album: RenderField<MediaItem> = (item) => <Text value={item.album} />;
+const Album: RenderField<MediaItem> = (item) => {
+    return item.links?.album ? (
+        <InternalLink className="text" path={srcToPath(item.links.album)}>
+            {item.album}
+        </InternalLink>
+    ) : (
+        <Text value={item.album} />
+    );
+};
 
-const AlbumArtist: RenderField<MediaItem> = (item) => <Text value={item.albumArtist} />;
+const AlbumArtist: RenderField<MediaItem> = (item) => {
+    return item.links?.albumArtists ? (
+        <>
+            {item.albumArtists
+                ?.map((artist, index) => {
+                    const link = item.links!.albumArtists![index];
+                    return link ? (
+                        <InternalLink className="text" path={srcToPath(link)}>
+                            {artist}
+                        </InternalLink>
+                    ) : (
+                        <Text value={artist} />
+                    );
+                })
+                // This is basically `Array.join(',')` in React.
+                .reduce(
+                    (list: React.JSX.Element | null, item: React.JSX.Element | null) =>
+                        // prettier-ignore
+                        list ? (<>{list}, {item}</>) : item,
+                    null
+                )}
+        </>
+    ) : (
+        <Text value={item.albumArtists?.join(', ') || item.albumArtist} />
+    );
+};
 
-const AlbumType: RenderField<MediaAlbum> = (album) => {
+const AlbumTypeText: RenderField<MediaAlbum> = (album) => {
     return <Text value={album.albumType ? album.albumType : ''} />;
 };
 
@@ -212,13 +294,24 @@ const ListenDate: RenderField<MediaPlaylist | MediaAlbum | MediaItem> = (item) =
     );
 };
 
-const AlbumAndYear: RenderField<MediaItem> = (item) => (
-    <Text
-        value={
-            item.album ? (item.year ? `${item.album} (${item.year})` : item.album) : item.year || ''
-        }
-    />
-);
+const AlbumAndYear: RenderField<MediaItem> = (item) => {
+    return item.links?.album ? (
+        <span className="text">
+            <InternalLink path={srcToPath(item.links.album)}>{item.album}</InternalLink>
+            {item.year ? ` (${item.year})` : ''}
+        </span>
+    ) : (
+        <Text
+            value={
+                item.album
+                    ? item.year
+                        ? `${item.album} (${item.year})`
+                        : item.album
+                    : item.year || ''
+            }
+        />
+    );
+};
 
 const FileIcon: RenderField<MediaFolderItem> = (item: MediaFolderItem, info) => {
     const icon =
@@ -281,13 +374,14 @@ const Badges: RenderField<MediaItem> = (item) => {
 };
 
 export const Country: RenderField<MediaItem | MediaArtist> = (item) => {
-    return item.country && item.countryCode ? (
+    const location = item.itemType === ItemType.Artist ? item.origin : item.country;
+    return location && item.countryCode ? (
         <>
             <Flag country={item.countryCode} />
-            <Text value={item.country} />
+            <Text value={location} />
         </>
     ) : (
-        <Text value={item.country} />
+        <Text value={location} />
     );
 };
 
@@ -373,7 +467,7 @@ const mediaListFields: Record<Field, FieldSpec> = {
     AlbumType: {
         id: 'AlbumType',
         title: 'Type',
-        render: AlbumType,
+        render: AlbumTypeText,
         className: 'album-type',
     },
     AlbumAndYear: {

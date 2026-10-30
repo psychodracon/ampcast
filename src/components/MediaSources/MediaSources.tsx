@@ -1,56 +1,73 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import MediaService from 'types/MediaService';
-import {AnyMediaSource} from 'types/MediaSource';
 import {LiteStorage} from 'utils';
+import {getServiceFromPath} from 'services/mediaServices';
+import {getVisibleServices} from 'services/mediaServices/servicesSettings';
 import {showDialog} from 'components/Dialog';
 import StartupWizard from 'components/StartupWizard';
 import TreeView, {TreeViewHandle} from 'components/TreeView';
+import useHistory from 'components/MediaBrowser/useHistory';
+import useOnResize, {ResizeRect} from 'hooks/useOnResize';
 import useMediaSources from './useMediaSources';
 import showMediaSourcesMenu from './showMediaSourcesMenu';
 
-export const storage = new LiteStorage('sources');
-
-export interface MediaSourceView {
-    readonly source: MediaService | AnyMediaSource;
-    readonly view: React.ReactNode;
-}
+const storage = new LiteStorage('sources');
 
 export interface MediaSourcesProps {
-    onSelect?: (source: MediaSourceView | null) => void;
+    onClick?: (source: string) => void;
+    onResize?: (rect: ResizeRect) => void;
+    onSelect?: (source: string) => void;
+    ref?: React.RefObject<TreeViewHandle | null>;
 }
 
-export default function MediaSources({onSelect}: MediaSourcesProps) {
-    const ref = useRef<HTMLDivElement | null>(null);
-    const treeViewRef = useRef<TreeViewHandle>(null);
+export default function MediaSources({onClick, onResize, onSelect, ref}: MediaSourcesProps) {
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const sources = useMediaSources();
+    const {refresh} = useHistory();
     const [wizardShown, setWizardShown] = useState(false);
 
     useEffect(() => {
-        treeViewRef.current!.focus();
-    }, []);
+        ref?.current?.focus();
+    }, [ref]);
+
+    const showStartupWizard = useCallback(async () => {
+        const classList = document.body.classList;
+        classList.toggle('showing-startup-wizard', true);
+        await showDialog(StartupWizard, true);
+        classList.toggle('showing-startup-wizard', false);
+        if (getVisibleServices().length > 0) {
+            refresh();
+        }
+    }, [refresh]);
 
     useEffect(() => {
         if (sources) {
             const useWizard = sources.length === 0 && !wizardShown;
             setWizardShown(true);
             if (useWizard) {
-                showDialog(StartupWizard, true);
+                storage.clear();
+                showStartupWizard();
             }
         }
-    }, [sources, wizardShown]);
+    }, [sources, wizardShown, showStartupWizard]);
 
-    const handleContextMenu = useCallback(async (item: MediaSourceView, x: number, y: number) => {
-        showMediaSourcesMenu(item, ref.current!, x, y);
+    useOnResize(containerRef, (rect) => onResize?.(rect));
+
+    const handleContextMenu = useCallback(async (path: string, x: number, y: number) => {
+        const service = getServiceFromPath(path);
+        if (service) {
+            showMediaSourcesMenu(service, containerRef.current!, x, y);
+        }
     }, []);
 
     return (
-        <div className="panel media-sources" ref={ref}>
-            <TreeView<MediaSourceView>
+        <div className="panel media-sources" ref={containerRef}>
+            <TreeView<string>
                 roots={sources || []}
+                onClick={onClick}
                 onContextMenu={handleContextMenu}
                 onSelect={onSelect}
                 storageId={storage.id}
-                ref={treeViewRef}
+                ref={ref}
             />
         </div>
     );

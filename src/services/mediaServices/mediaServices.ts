@@ -18,6 +18,7 @@ import {
 import Browsable from 'types/Browsable';
 import DataService from 'types/DataService';
 import MediaItem from 'types/MediaItem';
+import MediaObject from 'types/MediaObject';
 import MediaService from 'types/MediaService';
 import MediaServiceId from 'types/MediaServiceId';
 import PersonalMediaService from 'types/PersonalMediaService';
@@ -48,6 +49,10 @@ export function observeIsLoggedIn(service: MediaService | string): Observable<bo
         switchMap((service) => (service ? service.observeIsLoggedIn() : of(false))),
         distinctUntilChanged()
     );
+}
+
+export function getEnableServices(): readonly MediaService[] {
+    return services$.value.filter((service) => !isServiceDisabled(service));
 }
 
 export function getServices(): readonly MediaService[] {
@@ -125,6 +130,12 @@ export function getService<T extends MediaService>(serviceId: string): T | undef
     return getServices().find<T>((service): service is T => service.id === serviceId);
 }
 
+export function getServiceFromPath(path: string): MediaService | undefined {
+    const [a, b] = path.split('/');
+    const serviceId = a === 'pins' ? b : a;
+    return getService(serviceId);
+}
+
 export function getServiceFromSrc({src}: {src?: string} = {}): MediaService | undefined {
     const [serviceId] = String(src).split(':');
     return getService(serviceId);
@@ -146,6 +157,10 @@ export function isDataService(service: MediaService): service is DataService {
 
 export function isMediaService(service: any): service is MediaService {
     return service ? 'serviceType' in service : false;
+}
+
+export function isPersonalMedia(item: MediaObject): boolean {
+    return getServiceFromSrc(item)?.serviceType === ServiceType.PersonalMedia;
 }
 
 export function isPersonalMediaService(service: MediaService): service is PersonalMediaService {
@@ -220,6 +235,10 @@ export function isPlayableSrc(src: string, immediate?: boolean): boolean {
         }
     }
     return false;
+}
+
+export function isPublicMedia(item: MediaObject): boolean {
+    return getServiceFromSrc(item)?.serviceType === ServiceType.PublicMedia;
 }
 
 export function isPublicMediaService(service: MediaService): service is PublicMediaService {

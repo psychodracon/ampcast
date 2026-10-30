@@ -66,6 +66,7 @@ declare namespace plex {
         readonly updatedAt: number; // Date
         readonly viewCount: number;
         readonly librarySectionTitle?: string;
+        readonly librarySectionID?: number;
         readonly rating?: number;
         readonly ratingCount?: number;
         readonly saved?: boolean;
@@ -321,6 +322,19 @@ declare namespace plex {
 
     interface PlayQueueItem extends Track {
         readonly playQueueItemID: number;
+    }
+
+    interface LibraryPrefs {
+        readonly Setting: readonly LibrarySetting[];
+    }
+
+    interface LibrarySetting {
+        readonly id: string;
+        readonly value: string;
+    }
+
+    interface LibraryPrefsResponse {
+        readonly MediaContainer: LibraryPrefs;
     }
 
     interface Directory {

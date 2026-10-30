@@ -2,7 +2,6 @@ import type {Observable} from 'rxjs';
 import {
     EMPTY,
     BehaviorSubject,
-    Subject,
     combineLatest,
     debounceTime,
     delay,
@@ -19,7 +18,6 @@ import {
     skipWhile,
     switchMap,
     take,
-    takeUntil,
     tap,
     timer,
     withLatestFrom,
@@ -46,7 +44,6 @@ import './scrobbler';
 
 const logger = new Logger('mediaPlayback');
 const loadingLocked$ = new BehaviorSubject(!isMiniPlayer);
-const killed$ = new Subject<void>();
 
 let _autoplay = false;
 let _stopAfterCurrent = false;
@@ -288,15 +285,6 @@ function unlockLoading(): void {
     loadingLocked$.next(false);
 }
 
-function kill(): void {
-    killed$.next();
-    if (isMiniPlayer) {
-        mediaPlayer.pause();
-    } else {
-        stop();
-    }
-}
-
 async function getPlayableItem(item: PlaylistItem | null): Promise<PlaylistItem | null> {
     if (!item) {
         return null;
@@ -443,10 +431,7 @@ playlist
 if (!isMiniPlayer) {
     // Stop/next after playback ended.
     observeEnded()
-        .pipe(
-            filter(() => !mediaPlayer.loop),
-            takeUntil(killed$)
-        )
+        .pipe(filter(() => !mediaPlayer.loop))
         .subscribe(() => {
             if (playlist.atEnd) {
                 if (
@@ -472,14 +457,11 @@ if (!isMiniPlayer) {
         });
 
     // `stopAfterCurrent`.
-    playback
-        .observePlaybackEnd()
-        .pipe(takeUntil(killed$))
-        .subscribe(() => {
-            if (mediaPlayback.stopAfterCurrent) {
-                stop();
-            }
-        });
+    playback.observePlaybackEnd().subscribe(() => {
+        if (mediaPlayback.stopAfterCurrent) {
+            stop();
+        }
+    });
 
     // Continue playing if we get a playback error (move to the next track)
     playlist
@@ -497,8 +479,7 @@ if (!isMiniPlayer) {
                           )
                       )
                     : EMPTY
-            ),
-            takeUntil(killed$)
+            )
         )
         .subscribe(([, paused, atStart, atEnd]) => {
             if (!paused) {
@@ -630,7 +611,13 @@ if (!isMiniPlayer) {
         .subscribe(logger);
 }
 
-fromEvent(window, 'pagehide').subscribe(kill);
+fromEvent(window, 'pagehide').subscribe(() => {
+    if (isMiniPlayer) {
+        mediaPlayer.pause();
+    } else {
+        stop();
+    }
+});
 
 // logging
 observePlaying().subscribe(() => logger.log('playing'));
