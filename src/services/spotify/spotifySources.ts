@@ -258,7 +258,7 @@ const spotifyLikedAlbums: MediaSource<MediaAlbum> = {
                 const {items, total, next} = await spotifyApi.getMyAlbums(offset, limit);
                 return {items: items.filter(exists).map((item) => item.album), total, next};
             },
-            `${spotifyLikedAlbums.id}/1`,
+            `${spotifyLikedAlbums.sourceId}/1`,
             undefined,
             true,
         );
@@ -287,10 +287,10 @@ const spotifyFollowedArtists: MediaSource<MediaArtist> = {
                 } = await spotifyApi.getFollowedArtists(after, limit);
                 return {items, total, next: cursors?.after};
             },
-            `${spotifyFollowedArtists.id}/1`,
+            `${spotifyFollowedArtists.sourceId}/1`,
             undefined,
             true,
-            `${spotifyFollowedArtists.id}/2`,
+            `${spotifyFollowedArtists.sourceId}/2`,
         );
     },
 };

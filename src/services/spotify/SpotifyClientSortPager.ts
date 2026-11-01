@@ -184,7 +184,7 @@ export default class SpotifyClientSortPager<T extends MediaObject> extends Seque
                 return obj.title || obj.name || '';
             case 'Artist':
             case 'artist':
-                return obj.artist || obj.albumArtist || '';
+                return String(obj.artists || obj.albumArtists || obj.artist || '');
             case 'Album':
                 return obj.album || obj.title || '';
             case 'Year':
